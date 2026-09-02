@@ -1,4 +1,5 @@
 const { spawn } = require("child_process");
+const { extractBlockedPersistentTool } = require("./events");
 
 const FORBIDDEN_EXTRA_ARGS = new Set([
   "-p",
@@ -217,6 +218,19 @@ class AntigravityProcessClient {
             }
           }
 
+          const blockedTool = extractBlockedPersistentTool(parsed);
+          if (blockedTool) {
+            console.error(`[cyberboss] antigravity blocked unsupported persistent tool: ${blockedTool}`);
+            abortAndReject(
+              new Error(
+                `antigravity attempted unsupported persistent tool: ${blockedTool}. ` +
+                `Headless turns cannot run persistent background schedulers or timers. ` +
+                `Use Cyberboss persistent reminder/task mechanism instead.`
+              )
+            );
+            return;
+          }
+
           this.emit(parsed);
         }
       });
@@ -235,6 +249,17 @@ class AntigravityProcessClient {
           stdoutBuffer = "";
           try {
             const parsed = JSON.parse(trimmed);
+            const blockedTool = extractBlockedPersistentTool(parsed);
+            if (blockedTool) {
+              console.error(`[cyberboss] antigravity blocked unsupported persistent tool: ${blockedTool}`);
+              return abortAndReject(
+                new Error(
+                  `antigravity attempted unsupported persistent tool: ${blockedTool}. ` +
+                  `Headless turns cannot run persistent background schedulers or timers. ` +
+                  `Use Cyberboss persistent reminder/task mechanism instead.`
+                )
+              );
+            }
             if (parsed.event === "result" && parsed.result) {
               resultEvent = parsed.result;
               if (resultEvent.conversation_id) {

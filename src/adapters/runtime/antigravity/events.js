@@ -98,6 +98,45 @@ function mapAntigravityMessageToRuntimeEvents(raw, context = {}) {
   }
 }
 
+const BLOCKED_PERSISTENT_TOOLS = new Set([
+  "schedule",
+  "manage_task",
+  "wait",
+  "sleep",
+]);
+
+function extractBlockedPersistentTool(raw) {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  const step = raw.step_update || raw.step || raw;
+  let toolName = (step.tool_name || raw.tool_name || "").trim().toLowerCase();
+
+  if (!toolName && Array.isArray(step.tool_calls) && step.tool_calls.length > 0) {
+    const firstCall = step.tool_calls[0];
+    if (firstCall && typeof firstCall === "object") {
+      toolName = (firstCall.name || firstCall.tool_name || "").trim().toLowerCase();
+    }
+  }
+
+  if (BLOCKED_PERSISTENT_TOOLS.has(toolName)) {
+    return toolName;
+  }
+
+  if (toolName === "call_mcp_tool") {
+    const input = step.tool_input || raw.tool_input || step.args || raw.args || {};
+    const innerTool = String(input.ToolName || input.tool_name || input.tool || "").trim().toLowerCase();
+    if (BLOCKED_PERSISTENT_TOOLS.has(innerTool)) {
+      return `call_mcp_tool(${innerTool})`;
+    }
+  }
+
+  return null;
+}
+
 module.exports = {
   mapAntigravityMessageToRuntimeEvents,
+  extractBlockedPersistentTool,
+  BLOCKED_PERSISTENT_TOOLS: Array.from(BLOCKED_PERSISTENT_TOOLS),
 };
