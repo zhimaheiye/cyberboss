@@ -12,7 +12,7 @@ const {
 
 async function main() {
   const workspaceRoot = process.env.CYBERBOSS_WORKSPACE_ROOT || process.cwd();
-  const runtime = process.env.CYBERBOSS_RUNTIME || "codex";
+  const runtime = (process.env.CYBERBOSS_RUNTIME || "codex").trim().toLowerCase();
 
   if (runtime === "codex") {
     await ensureSharedAppServer();
@@ -38,6 +38,18 @@ async function main() {
       process.exit(code ?? 0);
     });
     return;
+  }
+
+  if (runtime === "antigravity") {
+    console.error("Antigravity shared:open is not implemented yet.");
+    console.error("The Cyberboss Antigravity runtime itself is available.");
+    console.error("Use the Runtime integration tests for now.");
+    process.exit(1);
+  }
+
+  if (runtime !== "claudecode") {
+    console.error(`Unsupported CYBERBOSS_RUNTIME: ${runtime || "(empty)"}`);
+    process.exit(1);
   }
 
   // For Claude: connect to the bridge's IPC socket so we can observe and

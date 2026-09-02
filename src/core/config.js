@@ -78,6 +78,11 @@ function readConfig() {
     claudePermissionMode: readTextEnv("CYBERBOSS_CLAUDE_PERMISSION_MODE") || "default",
     claudeDisableVerbose: readBoolEnv("CYBERBOSS_CLAUDE_DISABLE_VERBOSE"),
     claudeExtraArgs: readListEnv("CYBERBOSS_CLAUDE_EXTRA_ARGS"),
+    antigravityCommand: readTextEnv("CYBERBOSS_ANTIGRAVITY_COMMAND") || "antigravity",
+    antigravityModel: readTextEnv("CYBERBOSS_ANTIGRAVITY_MODEL") || "",
+    antigravityEffort: readTextEnv("CYBERBOSS_ANTIGRAVITY_EFFORT") || "",
+    antigravityExtraArgs: readListEnv("CYBERBOSS_ANTIGRAVITY_EXTRA_ARGS"),
+    antigravityTimeoutMs: readIntEnv("CYBERBOSS_ANTIGRAVITY_TIMEOUT_MS") || 120_000,
     sessionsFile: path.join(stateDir, "sessions.json"),
     startWithCheckin: (mode === "start" && hasArgFlag(argv, "--checkin")) || readBoolEnv("CYBERBOSS_ENABLE_CHECKIN"),
   };

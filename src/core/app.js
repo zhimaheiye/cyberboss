@@ -7,6 +7,7 @@ const { DEFAULT_MIN_WEIXIN_CHUNK, MAX_MIN_WEIXIN_CHUNK } = require("../adapters/
 const { persistIncomingWeixinAttachments } = require("../adapters/channel/weixin/media-receive");
 const { createCodexRuntimeAdapter } = require("../adapters/runtime/codex");
 const { createClaudeCodeRuntimeAdapter } = require("../adapters/runtime/claudecode");
+const { createAntigravityRuntimeAdapter } = require("../adapters/runtime/antigravity");
 const { findModelByQuery } = require("../adapters/runtime/codex/model-catalog");
 const { createTimelineIntegration } = require("../integrations/timeline");
 const {
@@ -52,10 +53,26 @@ const MAX_INBOUND_STICKER_IMAGE_BATCH = 10;
 const INBOUND_IMAGE_BATCH_IDLE_MS = 1_500;
 
 function createRuntimeAdapter(config) {
-  if (config.runtime === "claudecode") {
+  const runtime =
+    typeof config.runtime === "string"
+      ? config.runtime.trim().toLowerCase()
+      : "";
+
+  if (runtime === "codex") {
+    return createCodexRuntimeAdapter(config);
+  }
+
+  if (runtime === "claudecode") {
     return createClaudeCodeRuntimeAdapter(config);
   }
-  return createCodexRuntimeAdapter(config);
+
+  if (runtime === "antigravity") {
+    return createAntigravityRuntimeAdapter(config);
+  }
+
+  throw new Error(
+    `Unsupported CYBERBOSS_RUNTIME: ${config.runtime || "(empty)"}`
+  );
 }
 
 class CyberbossApp {
