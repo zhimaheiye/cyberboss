@@ -2,6 +2,8 @@ const { AntigravityProcessClient } = require("./process-client");
 const { SessionStore } = require("../codex/session-store");
 const { buildOpeningTurnText, buildInstructionRefreshText } = require("../shared-instructions");
 const { mapAntigravityMessageToRuntimeEvents } = require("./events");
+const { ensureAntigravityGlobalMcpConfig } = require("./mcp-settings");
+const path = require("path");
 
 function createAntigravityRuntimeAdapter(config = {}) {
   const sessionStore = new SessionStore({
@@ -60,6 +62,16 @@ function createAntigravityRuntimeAdapter(config = {}) {
     let outboundText = text;
     if (!threadId && !isInstructionRefresh) {
       outboundText = buildOpeningTurnText(config, text);
+    }
+
+    try {
+      const projectSettings = ensureAntigravityGlobalMcpConfig({
+        workspaceRoot: normalizedWorkspace,
+        cyberbossHome: process.env.CYBERBOSS_HOME || path.resolve(__dirname, "..", "..", "..", ".."),
+      });
+      console.log(`[antigravity-runtime] workspace=${normalizedWorkspace} mcp_config=${projectSettings.configPath} server=${projectSettings.serverName}`);
+    } catch (mcpErr) {
+      console.error(`[antigravity-runtime] failed to configure MCP: ${mcpErr.message}`);
     }
 
     const client = new AntigravityProcessClient({
