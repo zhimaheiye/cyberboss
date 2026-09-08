@@ -20,9 +20,7 @@ function ensureAntigravityGlobalMcpConfig({ workspaceRoot, cyberbossHome = "" } 
     current.mcpServers = {};
   }
 
-  const pathForHash = process.platform === "win32" ? normalizedWorkspaceRoot.toLowerCase().replace(/\\/g, "/") : normalizedWorkspaceRoot;
-  const hash = crypto.createHash("md5").update(pathForHash).digest("hex").slice(0, 8);
-  const serverName = `cyberboss_tools_${hash}`;
+  const serverName = computeAntigravityServerName(normalizedWorkspaceRoot);
 
   const next = {
     ...current,
@@ -81,7 +79,15 @@ function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function computeAntigravityServerName(workspaceRoot) {
+  const normalized = normalizeText(workspaceRoot);
+  const pathForHash = process.platform === "win32" ? normalized.toLowerCase().replace(/\\/g, "/") : normalized;
+  const hash = crypto.createHash("md5").update(pathForHash).digest("hex").slice(0, 8);
+  return `cyberboss_tools_${hash}`;
+}
+
 module.exports = {
   ensureAntigravityGlobalMcpConfig,
   buildAntigravityProjectMcpServerConfig,
+  computeAntigravityServerName,
 };

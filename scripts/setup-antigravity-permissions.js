@@ -2,6 +2,8 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
+const { computeAntigravityServerName } = require("../src/adapters/runtime/antigravity/mcp-settings");
+
 function loadEnv() {
   try {
     const dotenv = require("dotenv");
@@ -26,6 +28,9 @@ function normalizeForAntigravityPermissionPath(absPath) {
 }
 
 function getSettingsPath() {
+  if (process.env.CYBERBOSS_ANTIGRAVITY_SETTINGS_PATH) {
+    return path.resolve(process.env.CYBERBOSS_ANTIGRAVITY_SETTINGS_PATH);
+  }
   return path.join(os.homedir(), ".gemini", "antigravity-cli", "settings.json");
 }
 
@@ -36,6 +41,9 @@ function readSettingsFile(settingsPath) {
   const rawText = fs.readFileSync(settingsPath, "utf-8");
   try {
     const settings = JSON.parse(rawText);
+    if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
+      throw new Error("Invalid settings object");
+    }
     return { settings, rawText, exists: true };
   } catch {
     console.error("Failed to parse existing Antigravity settings.");
@@ -44,16 +52,52 @@ function readSettingsFile(settingsPath) {
   }
 }
 
+function resolveTargetRules({ stateDir, workspaceRoot } = {}) {
+  const resolvedStateDir = stateDir || process.env.CYBERBOSS_STATE_DIR || path.join(os.homedir(), ".cyberboss");
+  const inboxDir = path.join(resolvedStateDir, "inbox");
+  const normalizedPath = normalizeForAntigravityPermissionPath(inboxDir);
+  const readFileRule = `read_file(${normalizedPath})`;
+
+  const resolvedWorkspaceRoot = workspaceRoot || process.env.CYBERBOSS_WORKSPACE_ROOT || process.cwd();
+  const serverName = computeAntigravityServerName(resolvedWorkspaceRoot);
+  const mcpRule = `mcp(${serverName}/*)`;
+
+  return {
+    stateDir: resolvedStateDir,
+    inboxDir,
+    normalizedPath,
+    workspaceRoot: resolvedWorkspaceRoot,
+    serverName,
+    readFileRule,
+    mcpRule,
+    targetRules: [readFileRule, mcpRule],
+  };
+}
+
 function main() {
   loadEnv();
 
   const args = process.argv.slice(2);
-  const mode = args[0] || "--show";
+  let mode = "--show";
+  let customWorkspaceRoot = "";
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--show" || args[i] === "--apply" || args[i] === "--remove") {
+      mode = args[i];
+    } else if (args[i] === "--workspace-root" && args[i + 1]) {
+      customWorkspaceRoot = args[++i];
+    }
+  }
 
-  const stateDir = process.env.CYBERBOSS_STATE_DIR || path.join(os.homedir(), ".cyberboss");
-  const inboxDir = path.join(stateDir, "inbox");
-  const normalizedPath = normalizeForAntigravityPermissionPath(inboxDir);
-  const targetRule = `read_file(${normalizedPath})`;
+  const {
+    stateDir,
+    inboxDir,
+    normalizedPath,
+    workspaceRoot,
+    serverName,
+    readFileRule,
+    mcpRule,
+    targetRules,
+  } = resolveTargetRules({ workspaceRoot: customWorkspaceRoot });
 
   const settingsPath = getSettingsPath();
   const { settings, exists } = readSettingsFile(settingsPath);
@@ -69,34 +113,50 @@ function main() {
   console.log(`Settings path: ${settingsPath}`);
   console.log(`Cyberboss stateDir: ${stateDir}`);
   console.log(`Cyberboss inbox: ${inboxDir}`);
-  console.log(`Normalized path: ${normalizedPath}`);
-  console.log(`Antigravity rule: ${targetRule}`);
-  console.log("Existing allow rules:", allowList.filter((r) => typeof r === "string" && (r.includes("read_file") || r.includes("write_file"))));
-  console.log("Existing ask rules:", askList.filter((r) => typeof r === "string" && (r.includes("read_file") || r.includes("write_file"))));
-  console.log("Existing deny rules:", denyList.filter((r) => typeof r === "string" && (r.includes("read_file") || r.includes("write_file"))));
+  console.log(`Normalized inbox path: ${normalizedPath}`);
+  console.log(`Workspace root: ${workspaceRoot}`);
+  console.log(`Target MCP server: ${serverName}`);
+  console.log(`Antigravity read rule: ${readFileRule}`);
+  console.log(`Antigravity MCP rule: ${mcpRule}`);
+  console.log("Existing allow rules:", allowList.filter((r) => typeof r === "string" && (r.includes("read_file") || r.includes("write_file") || r.includes("mcp"))));
+  console.log("Existing ask rules:", askList.filter((r) => typeof r === "string" && (r.includes("read_file") || r.includes("write_file") || r.includes("mcp"))));
+  console.log("Existing deny rules:", denyList.filter((r) => typeof r === "string" && (r.includes("read_file") || r.includes("write_file") || r.includes("mcp"))));
 
-  const isRulePresent = allowList.includes(targetRule);
+  const allRulesPresent = targetRules.every((r) => allowList.includes(r));
 
   if (mode === "--show") {
-    console.log(`\nRule status: ${isRulePresent ? "ALREADY_PRESENT" : "NOT_PRESENT"}`);
+    console.log(`\nRule status: ${allRulesPresent ? "ALREADY_PRESENT" : "NOT_PRESENT"}`);
+    for (const rule of targetRules) {
+      console.log(`  ${rule}: ${allowList.includes(rule) ? "PRESENT" : "MISSING"}`);
+    }
     return;
   }
 
   if (mode === "--apply") {
-    // Check conflicts
-    const conflictInDeny = denyList.some((r) => r === "read_file(*)" || r === targetRule);
-    const conflictInAsk = askList.some((r) => r === "read_file(*)" || r === targetRule);
+    // Check conflicts for read_file
+    const conflictReadFileDeny = denyList.some((r) => r === "read_file(*)" || r === readFileRule);
+    const conflictReadFileAsk = askList.some((r) => r === "read_file(*)" || r === readFileRule);
+
+    // Check conflicts for mcp
+    const conflictMcpDeny = denyList.some((r) => r === "mcp(*)" || r === mcpRule);
+    const conflictMcpAsk = askList.some((r) => r === "mcp(*)" || r === mcpRule);
+
+    const conflictInDeny = conflictReadFileDeny || conflictMcpDeny;
+    const conflictInAsk = conflictReadFileAsk || conflictMcpAsk;
     if (conflictInDeny || conflictInAsk) {
       console.error("\nCONFLICTING_PERMISSION_RULE");
-      console.error(`Conflict found in deny: ${conflictInDeny}, in ask: ${conflictInAsk}`);
+      console.error(`Conflict found in deny: ${conflictInDeny} (read=${conflictReadFileDeny}, mcp=${conflictMcpDeny}), in ask: ${conflictInAsk} (read=${conflictReadFileAsk}, mcp=${conflictMcpAsk})`);
       process.exit(1);
     }
 
     if (allowList.includes("read_file(*)")) {
       console.warn("\nWARNING: EXISTING_BROAD_READ_PERMISSION detected in allow list (read_file(*))");
     }
+    if (allowList.includes("mcp(*)")) {
+      console.warn("\nWARNING: EXISTING_BROAD_MCP_PERMISSION detected in allow list (mcp(*))");
+    }
 
-    if (isRulePresent) {
+    if (allRulesPresent) {
       console.log("\nPERMISSION_ALREADY_PRESENT");
       console.log("MINIMAL_PERMISSION_APPLIED_PASS");
       return;
@@ -114,10 +174,14 @@ function main() {
       fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
     }
 
-    // Apply rule
+    // Apply rules
     settings.permissions = settings.permissions || {};
     settings.permissions.allow = settings.permissions.allow || [];
-    settings.permissions.allow.push(targetRule);
+    for (const rule of targetRules) {
+      if (!settings.permissions.allow.includes(rule)) {
+        settings.permissions.allow.push(rule);
+      }
+    }
 
     // Atomic write
     const newContent = JSON.stringify(settings, null, 2) + "\n";
@@ -132,11 +196,12 @@ function main() {
 
     // Verification
     const reloaded = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
-    if (
+    const verified =
       reloaded.permissions &&
       Array.isArray(reloaded.permissions.allow) &&
-      reloaded.permissions.allow.includes(targetRule)
-    ) {
+      targetRules.every((r) => reloaded.permissions.allow.includes(r));
+
+    if (verified) {
       console.log("MINIMAL_PERMISSION_APPLIED_PASS");
     } else {
       console.error("Verification failed after apply");
@@ -146,12 +211,13 @@ function main() {
   }
 
   if (mode === "--remove") {
-    if (!exists || !isRulePresent) {
+    const anyPresent = targetRules.some((r) => allowList.includes(r));
+    if (!exists || !anyPresent) {
       console.log("\nPERMISSION_NOT_PRESENT");
       return;
     }
 
-    settings.permissions.allow = settings.permissions.allow.filter((r) => r !== targetRule);
+    settings.permissions.allow = settings.permissions.allow.filter((r) => !targetRules.includes(r));
     const newContent = JSON.stringify(settings, null, 2) + "\n";
     const tempPath = `${settingsPath}.tmp-${Date.now()}`;
     fs.writeFileSync(tempPath, newContent, "utf-8");
@@ -166,4 +232,14 @@ function main() {
   process.exit(1);
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  getSettingsPath,
+  readSettingsFile,
+  normalizeForAntigravityPermissionPath,
+  resolveTargetRules,
+  main,
+};
