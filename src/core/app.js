@@ -1509,6 +1509,17 @@ class CyberbossApp {
       }
       try {
         this.turnGateStore.releaseThread(event.payload.threadId);
+        // Fallback for the AGY terminal-event timing race: the Antigravity CLI
+        // emits its result event synchronously during process.on("close"), which
+        // means runtime.turn.completed can reach here *before* sendTurn() resolves
+        // and dispatchPreparedTurn calls attachThread().  In that case
+        // releaseThread() finds no scopeByThreadId entry and returns without
+        // clearing pendingScopeKeys.  We recover by calling releaseScope()
+        // directly on the binding that SessionStore already recorded (the session
+        // store is written before runtime events are emitted).
+        if (linked?.bindingKey && linked?.workspaceRoot) {
+          this.turnGateStore.releaseScope(linked.bindingKey, linked.workspaceRoot);
+        }
         if (event.type === "runtime.turn.failed") {
           await this.sendFailureToThread(
             event.payload.threadId,

@@ -19,6 +19,13 @@ class TurnGateStore {
     if (!normalizedScopeKey || !normalizedThreadId) {
       return;
     }
+    // Only record the mapping when the scope is still pending.
+    // If a terminal runtime event fired before sendTurn() resolved (AGY timing
+    // race), the scope was already released via releaseScope(). Writing the
+    // mapping here would leave a stale entry that could block future turns.
+    if (!this.pendingScopeKeys.has(normalizedScopeKey)) {
+      return;
+    }
     this.scopeByThreadId.set(normalizedThreadId, normalizedScopeKey);
   }
 
