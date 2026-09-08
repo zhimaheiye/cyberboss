@@ -9,7 +9,7 @@ function ensureAntigravityGlobalMcpConfig({ workspaceRoot, cyberbossHome = "" } 
     throw new Error("workspaceRoot is required to configure Antigravity project tools.");
   }
 
-  const agyAppData = path.join(os.homedir(), ".gemini", "antigravity");
+  const agyAppData = path.join(os.homedir(), ".gemini", "config");
   if (!fs.existsSync(agyAppData)) {
     fs.mkdirSync(agyAppData, { recursive: true });
   }
@@ -20,7 +20,8 @@ function ensureAntigravityGlobalMcpConfig({ workspaceRoot, cyberbossHome = "" } 
     current.mcpServers = {};
   }
 
-  const hash = crypto.createHash("md5").update(normalizedWorkspaceRoot).digest("hex").slice(0, 8);
+  const pathForHash = process.platform === "win32" ? normalizedWorkspaceRoot.toLowerCase().replace(/\\/g, "/") : normalizedWorkspaceRoot;
+  const hash = crypto.createHash("md5").update(pathForHash).digest("hex").slice(0, 8);
   const serverName = `cyberboss_tools_${hash}`;
 
   const next = {
@@ -35,7 +36,9 @@ function ensureAntigravityGlobalMcpConfig({ workspaceRoot, cyberbossHome = "" } 
   };
 
   if (!jsonEquals(current, next)) {
-    fs.writeFileSync(configPath, JSON.stringify(next, null, 2) + "\n", "utf8");
+    const tempPath = configPath + `.${crypto.randomBytes(4).toString("hex")}.tmp`;
+    fs.writeFileSync(tempPath, JSON.stringify(next, null, 2) + "\n", "utf8");
+    fs.renameSync(tempPath, configPath);
   }
 
   return {
@@ -59,14 +62,13 @@ function buildAntigravityProjectMcpServerConfig({ workspaceRoot, cyberbossHome =
 }
 
 function readJsonObject(filePath) {
-  try {
-    const raw = fs.readFileSync(filePath, "utf8");
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return parsed;
-    }
-  } catch {
-    // ignore
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+  const raw = fs.readFileSync(filePath, "utf8");
+  const parsed = JSON.parse(raw);
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    return parsed;
   }
   return null;
 }

@@ -7,7 +7,7 @@ async function main() {
   const cwd = process.cwd();
   
   // 1. Verify that mcp_config.json was populated by the adapter
-  const agyAppData = path.join(os.homedir(), ".gemini", "antigravity");
+  const agyAppData = path.join(os.homedir(), ".gemini", "config");
   const configPath = path.join(agyAppData, "mcp_config.json");
   
   if (!fs.existsSync(configPath)) {
@@ -18,7 +18,8 @@ async function main() {
   const configRaw = fs.readFileSync(configPath, "utf8");
   const config = JSON.parse(configRaw);
   
-  const hash = crypto.createHash("md5").update(cwd).digest("hex").slice(0, 8);
+  const pathForHash = process.platform === "win32" ? cwd.toLowerCase().replace(/\\/g, "/") : cwd;
+  const hash = crypto.createHash("md5").update(pathForHash).digest("hex").slice(0, 8);
   const serverName = `cyberboss_tools_${hash}`;
   
   if (!config.mcpServers || !config.mcpServers[serverName]) {
