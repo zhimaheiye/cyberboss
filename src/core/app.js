@@ -503,6 +503,9 @@ class CyberbossApp {
           text: `❌ Request failed\n${messageText}`,
           contextToken: prepared.contextToken,
         }).catch(() => {});
+      } else {
+        const checkinError = formatCheckinErrorMessage(error);
+        console.warn(`[cyberboss] checkin runtime failed: ${checkinError}`);
       }
       return false;
     }
@@ -856,7 +859,11 @@ class CyberbossApp {
         if (!dispatched) {
           this.systemMessageDispatcher.requeue(message);
         }
-      } catch {
+      } catch (error) {
+        if (message?.source === "checkin") {
+          const checkinError = formatCheckinErrorMessage(error);
+          console.warn(`[cyberboss] checkin runtime failed: ${checkinError}`);
+        }
         this.systemMessageDispatcher?.requeue(message);
       }
     }
@@ -1892,7 +1899,10 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-module.exports = { CyberbossApp };
+module.exports = {
+  CyberbossApp,
+  formatCheckinErrorMessage,
+};
 
 function parseChannelCommand(text) {
   const normalized = typeof text === "string" ? text.trim() : "";
@@ -2362,4 +2372,22 @@ function stringifyRpcId(value) {
 
 function hasRpcId(value) {
   return stringifyRpcId(value) !== "";
+}
+
+function formatCheckinErrorMessage(error, maxLength = 300) {
+  const raw = error instanceof Error
+    ? error.message || error.name || "unknown error"
+    : (typeof error?.message === "string" && error.message ? error.message : String(error || "unknown error"));
+  const sanitized = raw
+    .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [REDACTED]")
+    .replace(/(?:token|key|secret|password|credential)[=:\s]+[A-Za-z0-9._~+/-]{8,}/gi, (match) => {
+      const prefix = match.split(/[=:\s]+/)[0];
+      return `${prefix}=[REDACTED]`;
+    })
+    .replace(/[\r\n\t]+/g, " ")
+    .trim();
+  if (sanitized.length <= maxLength) {
+    return sanitized;
+  }
+  return `${sanitized.slice(0, maxLength)}...`;
 }

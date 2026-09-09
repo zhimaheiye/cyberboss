@@ -20,18 +20,12 @@ class SessionStore {
     try {
       const raw = fs.readFileSync(this.filePath, "utf8");
       const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === "object" && parsed.bindings) {
-        this.state = {
-          ...createEmptyState(),
-          ...parsed,
-          bindings: parsed.bindings || {},
-          approvalCommandAllowlistByWorkspaceRoot: parsed.approvalCommandAllowlistByWorkspaceRoot || {},
-          approvalPromptStateByThreadId: parsed.approvalPromptStateByThreadId || {},
-          availableModelCatalog: parsed.availableModelCatalog || {
-            models: [],
-            updatedAt: "",
-          },
-        };
+      if (parsed && typeof parsed === "object") {
+        this.state = migrateSessionStoreState(parsed, process.platform);
+        const serialized = JSON.stringify(this.state, null, 2);
+        if (serialized !== raw.trim()) {
+          this.save();
+        }
       }
     } catch {
       this.state = createEmptyState();
@@ -54,7 +48,7 @@ class SessionStore {
   }
 
   getActiveWorkspaceRoot(bindingKey) {
-    return normalizeValue(this.state.bindings[bindingKey]?.activeWorkspaceRoot);
+    return normalizeWorkspacePath(this.state.bindings[bindingKey]?.activeWorkspaceRoot);
   }
 
   updateBinding(bindingKey, nextBinding) {
@@ -67,7 +61,7 @@ class SessionStore {
   }
 
   getThreadIdForWorkspace(bindingKey, workspaceRoot, runtimeId = this.runtimeId) {
-    const normalizedWorkspaceRoot = normalizeValue(workspaceRoot);
+    const normalizedWorkspaceRoot = normalizeWorkspacePath(workspaceRoot);
     if (!normalizedWorkspaceRoot) {
       return "";
     }
@@ -80,7 +74,7 @@ class SessionStore {
   }
 
   setThreadIdForWorkspace(bindingKey, workspaceRoot, threadId, extra = {}, runtimeId = this.runtimeId) {
-    const normalizedWorkspaceRoot = normalizeValue(workspaceRoot);
+    const normalizedWorkspaceRoot = normalizeWorkspacePath(workspaceRoot);
     if (!normalizedWorkspaceRoot) {
       return this.getBinding(bindingKey);
     }
@@ -113,7 +107,7 @@ class SessionStore {
   }
 
   getRuntimeParamsForWorkspace(bindingKey, workspaceRoot) {
-    const normalizedWorkspaceRoot = normalizeValue(workspaceRoot);
+    const normalizedWorkspaceRoot = normalizeWorkspacePath(workspaceRoot);
     if (!normalizedWorkspaceRoot) {
       return { model: "", modelProvider: "" };
     }
@@ -128,7 +122,7 @@ class SessionStore {
   }
 
   setRuntimeParamsForWorkspace(bindingKey, workspaceRoot, params = {}) {
-    const normalizedWorkspaceRoot = normalizeValue(workspaceRoot);
+    const normalizedWorkspaceRoot = normalizeWorkspacePath(workspaceRoot);
     if (!normalizedWorkspaceRoot) {
       return this.getBinding(bindingKey);
     }
@@ -170,7 +164,7 @@ class SessionStore {
   }
 
   clearThreadIdForWorkspace(bindingKey, workspaceRoot, runtimeId = this.runtimeId) {
-    const normalizedWorkspaceRoot = normalizeValue(workspaceRoot);
+    const normalizedWorkspaceRoot = normalizeWorkspacePath(workspaceRoot);
     if (!normalizedWorkspaceRoot) {
       return this.getBinding(bindingKey);
     }
@@ -197,7 +191,7 @@ class SessionStore {
   }
 
   setActiveWorkspaceRoot(bindingKey, workspaceRoot) {
-    const normalizedWorkspaceRoot = normalizeValue(workspaceRoot);
+    const normalizedWorkspaceRoot = normalizeWorkspacePath(workspaceRoot);
     if (!normalizedWorkspaceRoot) {
       return this.getBinding(bindingKey);
     }
@@ -208,7 +202,7 @@ class SessionStore {
 
   listWorkspaceRoots(bindingKey, runtimeId = this.runtimeId) {
     const current = this.getBinding(bindingKey) || {};
-    return Object.keys(getThreadMapForRuntime(current, runtimeId));
+    return Object.keys(getThreadMapForRuntime(current, runtimeId)).map((p) => normalizeWorkspacePath(p));
   }
 
   findBindingForThreadId(threadId, runtimeId = this.runtimeId) {
@@ -222,7 +216,7 @@ class SessionStore {
         if (normalizeValue(candidateThreadId) === normalizedThreadId) {
           return {
             bindingKey,
-            workspaceRoot: normalizeValue(workspaceRoot),
+            workspaceRoot: normalizeWorkspacePath(workspaceRoot),
           };
         }
       }
@@ -231,7 +225,7 @@ class SessionStore {
   }
 
   getApprovalCommandAllowlistForWorkspace(workspaceRoot) {
-    const normalizedWorkspaceRoot = normalizeValue(workspaceRoot);
+    const normalizedWorkspaceRoot = normalizeWorkspacePath(workspaceRoot);
     if (!normalizedWorkspaceRoot) {
       return [];
     }
@@ -246,7 +240,7 @@ class SessionStore {
   }
 
   rememberApprovalPrefixForWorkspace(workspaceRoot, commandTokens) {
-    const normalizedWorkspaceRoot = normalizeValue(workspaceRoot);
+    const normalizedWorkspaceRoot = normalizeWorkspacePath(workspaceRoot);
     const normalizedTokens = normalizeCommandTokens(commandTokens);
     if (!normalizedWorkspaceRoot || !normalizedTokens.length) {
       return this.getApprovalCommandAllowlistForWorkspace(workspaceRoot);
@@ -412,4 +406,159 @@ function isSameTokenList(left, right) {
   return left.every((value, index) => value === right[index]);
 }
 
-module.exports = { SessionStore };
+function normalizeWorkspacePath(rawPath, platform = process.platform) {
+  if (typeof rawPath !== "string") {
+    return "";
+  }
+  const trimmed = rawPath.trim();
+  if (!trimmed) {
+    return "";
+  }
+  if (platform === "win32") {
+    const normalized = path.win32.normalize(trimmed);
+    return normalized.toLowerCase();
+  }
+  return path.posix.normalize(trimmed);
+}
+
+function migrateSessionStoreState(rawState, platform = process.platform) {
+  if (!rawState || typeof rawState !== "object") {
+    return createEmptyState();
+  }
+
+  const migrated = {
+    ...createEmptyState(),
+    ...rawState,
+    bindings: {},
+    approvalCommandAllowlistByWorkspaceRoot: {},
+    approvalPromptStateByThreadId: rawState.approvalPromptStateByThreadId || {},
+    availableModelCatalog: rawState.availableModelCatalog || {
+      models: [],
+      updatedAt: "",
+    },
+  };
+
+  const rawBindings = rawState.bindings && typeof rawState.bindings === "object" ? rawState.bindings : {};
+  for (const [bindingKey, binding] of Object.entries(rawBindings)) {
+    if (!binding || typeof binding !== "object") {
+      migrated.bindings[bindingKey] = binding;
+      continue;
+    }
+
+    const activeRaw = typeof binding.activeWorkspaceRoot === "string" ? binding.activeWorkspaceRoot.trim() : "";
+    const activeCanonical = normalizeWorkspacePath(activeRaw, platform);
+
+    const consolidateWorkspaceMap = (rawMap, resolveConflict) => {
+      if (!rawMap || typeof rawMap !== "object") return {};
+      const canonicalMap = {};
+      for (const [rawKey, val] of Object.entries(rawMap)) {
+        const canonicalKey = normalizeWorkspacePath(rawKey, platform);
+        if (!canonicalKey) continue;
+        if (!Object.prototype.hasOwnProperty.call(canonicalMap, canonicalKey)) {
+          canonicalMap[canonicalKey] = { val, rawKey };
+        } else {
+          const existing = canonicalMap[canonicalKey];
+          const chosen = resolveConflict(existing.val, val, existing.rawKey, rawKey, canonicalKey);
+          canonicalMap[canonicalKey] = chosen;
+        }
+      }
+      const result = {};
+      for (const [k, entry] of Object.entries(canonicalMap)) {
+        result[k] = entry.val;
+      }
+      return result;
+    };
+
+    const resolveThreadConflict = (valA, valB, keyA, keyB, canonicalKey, runtimeId) => {
+      const threadA = normalizeThreadValue(valA);
+      const threadB = normalizeThreadValue(valB);
+      if (!threadA && threadB) return { val: threadB, rawKey: keyB };
+      if (threadA && !threadB) return { val: threadA, rawKey: keyA };
+      if (threadA === threadB) return { val: threadA, rawKey: keyA };
+
+      const matchesActiveExactA = keyA === activeRaw;
+      const matchesActiveExactB = keyB === activeRaw;
+      if (matchesActiveExactA && !matchesActiveExactB) {
+        console.warn(
+          `[cyberboss] session-store merged conflicting workspace keys for binding="${bindingKey}" runtime="${runtimeId}" canonical="${canonicalKey}": preserved active workspace thread="${threadA}" (${keyA}) over "${threadB}" (${keyB})`
+        );
+        return { val: threadA, rawKey: keyA };
+      }
+      if (matchesActiveExactB && !matchesActiveExactA) {
+        console.warn(
+          `[cyberboss] session-store merged conflicting workspace keys for binding="${bindingKey}" runtime="${runtimeId}" canonical="${canonicalKey}": preserved active workspace thread="${threadB}" (${keyB}) over "${threadA}" (${keyA})`
+        );
+        return { val: threadB, rawKey: keyB };
+      }
+
+      const chosen = keyA > keyB ? { val: threadA, rawKey: keyA } : { val: threadB, rawKey: keyB };
+      console.warn(
+        `[cyberboss] session-store migrated conflicting workspace keys for binding="${bindingKey}" runtime="${runtimeId}" canonical="${canonicalKey}": resolved to thread="${chosen.val}" (candidates: ${keyA}=${threadA}, ${keyB}=${threadB})`
+      );
+      return chosen;
+    };
+
+    const migratedThreadIdByWorkspaceRootByRuntime = {};
+    const rawRuntimes = getThreadRuntimeMap(binding);
+    for (const [runtimeId, runtimeMap] of Object.entries(rawRuntimes)) {
+      migratedThreadIdByWorkspaceRootByRuntime[runtimeId] = consolidateWorkspaceMap(
+        runtimeMap,
+        (valA, valB, keyA, keyB, cKey) => resolveThreadConflict(valA, valB, keyA, keyB, cKey, runtimeId)
+      );
+    }
+
+    const migratedRuntimeParamsByWorkspaceRootByRuntime = {};
+    const rawParamRuntimes = getRuntimeParamsRuntimeMap(binding);
+    for (const [runtimeId, paramMap] of Object.entries(rawParamRuntimes)) {
+      migratedRuntimeParamsByWorkspaceRootByRuntime[runtimeId] = consolidateWorkspaceMap(
+        paramMap,
+        (valA, valB, keyA, keyB) => {
+          if (keyB === activeRaw) return { val: valB, rawKey: keyB };
+          if (keyA === activeRaw) return { val: valA, rawKey: keyA };
+          return (valB?.model || valB?.modelProvider) ? { val: valB, rawKey: keyB } : { val: valA, rawKey: keyA };
+        }
+      );
+    }
+
+    const migratedLegacyThreadMap = consolidateWorkspaceMap(
+      getLegacyThreadMap(binding),
+      (valA, valB, keyA, keyB, cKey) => resolveThreadConflict(valA, valB, keyA, keyB, cKey, "codex-legacy")
+    );
+    const migratedLegacyParamsMap = consolidateWorkspaceMap(
+      getCodexParamsMap(binding),
+      (valA, valB, keyA, keyB) => (keyB === activeRaw ? { val: valB, rawKey: keyB } : { val: valA, rawKey: keyA })
+    );
+
+    migrated.bindings[bindingKey] = {
+      ...binding,
+      activeWorkspaceRoot: activeCanonical,
+      threadIdByWorkspaceRootByRuntime: migratedThreadIdByWorkspaceRootByRuntime,
+      runtimeParamsByWorkspaceRootByRuntime: migratedRuntimeParamsByWorkspaceRootByRuntime,
+      ...(binding.threadIdByWorkspaceRoot ? { threadIdByWorkspaceRoot: migratedLegacyThreadMap } : {}),
+      ...(binding.codexParamsByWorkspaceRoot ? { codexParamsByWorkspaceRoot: migratedLegacyParamsMap } : {}),
+    };
+  }
+
+  const rawAllowlists = rawState.approvalCommandAllowlistByWorkspaceRoot;
+  if (rawAllowlists && typeof rawAllowlists === "object") {
+    for (const [rawWorkspace, tokensList] of Object.entries(rawAllowlists)) {
+      const canonicalKey = normalizeWorkspacePath(rawWorkspace, platform);
+      if (!canonicalKey || !Array.isArray(tokensList)) continue;
+      const existing = migrated.approvalCommandAllowlistByWorkspaceRoot[canonicalKey] || [];
+      for (const tokens of tokensList) {
+        if (!existing.some((e) => isSameTokenList(e, tokens))) {
+          existing.push(tokens);
+        }
+      }
+      migrated.approvalCommandAllowlistByWorkspaceRoot[canonicalKey] = existing;
+    }
+  }
+
+  return migrated;
+}
+
+module.exports = {
+  SessionStore,
+  normalizeWorkspacePath,
+  migrateSessionStoreState,
+};
