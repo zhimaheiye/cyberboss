@@ -244,6 +244,10 @@ class AntigravityProcessClient {
       });
 
       this.child.on("close", (code) => {
+        if (settled) {
+          return;
+        }
+
         if (stdoutBuffer.trim().length > 0) {
           const trimmed = stdoutBuffer.trim();
           stdoutBuffer = "";
@@ -277,6 +281,31 @@ class AntigravityProcessClient {
           }
         }
 
+        if (settled) {
+          return;
+        }
+
+        const finalConversationId = reportedConversationId || resultEvent?.conversation_id || "";
+        const hasValidSuccessfulResult = isSuccessfulResultEvent(resultEvent, finalConversationId);
+
+        if (hasValidSuccessfulResult) {
+          if (code !== 0) {
+            const stderrSummary = summarizeStderr(stderrBuffer);
+            console.warn(
+              `[cyberboss] antigravity exited nonzero after successful result; accepting completed turn code=${code}${stderrSummary ? ` stderr=${stderrSummary}` : ""}`
+            );
+          }
+
+          return safeResolve({
+            conversationId: finalConversationId,
+            response: resultEvent.response ?? "",
+            status: resultEvent.status ?? "SUCCESS",
+            numTurns: resultEvent.num_turns ?? 1,
+            usage: resultEvent.usage ?? {},
+            exitCode: code,
+          });
+        }
+
         if (code !== 0) {
           const errDetail = stderrBuffer.trim() || `exit code ${code}`;
           return safeReject(new Error(`antigravity exited with code ${code}: ${errDetail}`));
@@ -287,11 +316,14 @@ class AntigravityProcessClient {
           return safeReject(new Error(`antigravity process exited without emitting a result event${errDetail}`));
         }
 
-        if (!reportedConversationId && !resultEvent.conversation_id) {
-          return safeReject(new Error("antigravity process completed but did not provide a conversation ID"));
+        if (resultEvent.status !== "SUCCESS") {
+          const statusText = resultEvent.response || resultEvent.error || `status ${resultEvent.status}`;
+          return safeReject(new Error(`antigravity turn failed with ${statusText}`));
         }
 
-        const finalConversationId = reportedConversationId || resultEvent.conversation_id || "";
+        if (!finalConversationId) {
+          return safeReject(new Error("antigravity process completed but did not provide a conversation ID"));
+        }
 
         safeResolve({
           conversationId: finalConversationId,
@@ -320,6 +352,34 @@ class AntigravityProcessClient {
   }
 }
 
+function isSuccessfulResultEvent(resultEvent, finalConversationId) {
+  if (!resultEvent || typeof resultEvent !== "object") {
+    return false;
+  }
+  if (!finalConversationId || typeof finalConversationId !== "string" || !finalConversationId.trim()) {
+    return false;
+  }
+  return resultEvent.status === "SUCCESS";
+}
+
+function summarizeStderr(stderr, maxLength = 200) {
+  if (typeof stderr !== "string") {
+    return "";
+  }
+  const trimmed = stderr.trim();
+  if (!trimmed) {
+    return "";
+  }
+  const sanitized = trimmed.replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer <redacted>");
+  const singleLine = sanitized.replace(/\r?\n+/g, " | ");
+  if (singleLine.length <= maxLength) {
+    return singleLine;
+  }
+  return `${singleLine.slice(0, maxLength)}...`;
+}
+
 module.exports = {
   AntigravityProcessClient,
+  isSuccessfulResultEvent,
+  summarizeStderr,
 };
