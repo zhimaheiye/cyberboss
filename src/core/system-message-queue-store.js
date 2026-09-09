@@ -45,14 +45,15 @@ class SystemMessageQueueStore {
     return normalized;
   }
 
-  drainForAccount(accountId) {
+  drainDueForAccount(accountId, now = Date.now()) {
     this.load();
     const normalizedAccountId = normalizeText(accountId);
+    const nowMs = normalizeTimestampMs(now);
     const drained = [];
     const pending = [];
 
     for (const message of this.state.messages) {
-      if (message.accountId === normalizedAccountId) {
+      if (message.accountId === normalizedAccountId && isMessageDue(message, nowMs)) {
         drained.push(message);
       } else {
         pending.push(message);
@@ -67,10 +68,21 @@ class SystemMessageQueueStore {
     return drained;
   }
 
+  drainForAccount(accountId, now = Date.now()) {
+    return this.drainDueForAccount(accountId, now);
+  }
+
   hasPendingForAccount(accountId) {
     this.load();
     const normalizedAccountId = normalizeText(accountId);
     return this.state.messages.some((message) => message.accountId === normalizedAccountId);
+  }
+
+  hasDueForAccount(accountId, now = Date.now()) {
+    this.load();
+    const normalizedAccountId = normalizeText(accountId);
+    const nowMs = normalizeTimestampMs(now);
+    return this.state.messages.some((message) => message.accountId === normalizedAccountId && isMessageDue(message, nowMs));
   }
 }
 
@@ -90,6 +102,10 @@ function normalizeSystemMessage(message) {
     return null;
   }
 
+  const source = normalizeText(message.source) === "checkin" ? "checkin" : "system";
+  const attempts = Number.isInteger(message.attempts) && message.attempts >= 0 ? message.attempts : 0;
+  const nextAttemptAt = normalizeIsoTime(message.nextAttemptAt) || "";
+
   return {
     id,
     accountId,
@@ -97,6 +113,9 @@ function normalizeSystemMessage(message) {
     workspaceRoot,
     text,
     createdAt: createdAt || new Date().toISOString(),
+    source,
+    attempts,
+    nextAttemptAt,
   };
 }
 
@@ -125,4 +144,39 @@ function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-module.exports = { SystemMessageQueueStore };
+function isMessageDue(message, nowMs) {
+  if (!message || typeof message !== "object") {
+    return false;
+  }
+  const nextAttemptAt = normalizeText(message.nextAttemptAt);
+  if (!nextAttemptAt) {
+    return true;
+  }
+  const dueMs = Date.parse(nextAttemptAt);
+  if (!Number.isFinite(dueMs)) {
+    return true;
+  }
+  return dueMs <= nowMs;
+}
+
+function normalizeTimestampMs(now) {
+  if (typeof now === "number" && Number.isFinite(now)) {
+    return now;
+  }
+  if (typeof now === "string") {
+    const parsed = Date.parse(now);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  if (now instanceof Date && !Number.isNaN(now.getTime())) {
+    return now.getTime();
+  }
+  return Date.now();
+}
+
+module.exports = {
+  SystemMessageQueueStore,
+  normalizeSystemMessage,
+  isMessageDue,
+};

@@ -285,6 +285,7 @@ class CyberbossApp {
         workspaceRoot,
         text: triggerText,
         createdAt: normalizeIsoTime(point?.receivedAt) || normalizeIsoTime(point?.timestamp) || new Date().toISOString(),
+        source: "system",
       });
     }
 
@@ -296,6 +297,7 @@ class CyberbossApp {
         workspaceRoot,
         text: buildLocationMovementSystemText(movementEvent),
         createdAt: normalizeIsoTime(movementEvent?.movedAt) || new Date().toISOString(),
+        source: "system",
       });
     }
   }
@@ -495,11 +497,13 @@ class CyberbossApp {
     } catch (error) {
       this.turnGateStore.releaseScope(bindingKey, workspaceRoot);
       const messageText = error instanceof Error ? error.message : String(error || "unknown error");
-      await this.channelAdapter.sendText({
-        userId: prepared.senderId,
-        text: `❌ Request failed\n${messageText}`,
-        contextToken: prepared.contextToken,
-      }).catch(() => {});
+      if (prepared?.source !== "checkin") {
+        await this.channelAdapter.sendText({
+          userId: prepared.senderId,
+          text: `❌ Request failed\n${messageText}`,
+          contextToken: prepared.contextToken,
+        }).catch(() => {});
+      }
       return false;
     }
   }
@@ -930,6 +934,7 @@ class CyberbossApp {
           workspaceRoot: this.resolveReminderWorkspaceRoot(reminder),
           text: buildReminderSystemTrigger(reminder, this.config),
           createdAt: new Date().toISOString(),
+          source: "system",
         });
       } catch {
         this.reminderQueue.enqueue({

@@ -27,7 +27,10 @@ async function runSystemCheckinPoller(config) {
     console.log(`[cyberboss] next checkin in ${Math.round(delayMs / 60000)}m at ${wakeAt}`);
     await sleep(delayMs);
 
-    if (queue.hasPendingForAccount(account.accountId)) {
+    const hasPendingSystemMessage = typeof queue.hasDueForAccount === "function"
+      ? queue.hasDueForAccount(account.accountId)
+      : queue.hasPendingForAccount(account.accountId);
+    if (hasPendingSystemMessage) {
       console.log("[cyberboss] checkin skipped: pending system message still in queue");
       continue;
     }
@@ -39,6 +42,7 @@ async function runSystemCheckinPoller(config) {
       workspaceRoot: target.workspaceRoot,
       text: buildCheckinTrigger(config),
       createdAt: new Date().toISOString(),
+      source: "checkin",
     });
     console.log(`[cyberboss] checkin queued id=${queued.id}`);
   }
