@@ -1,5 +1,9 @@
 const { spawn } = require("child_process");
-const { extractBlockedPersistentTool } = require("./events");
+const {
+  extractBlockedPersistentTool,
+  isSuccessfulResultEvent,
+  formatResultFailureReason,
+} = require("./events");
 
 const FORBIDDEN_EXTRA_ARGS = new Set([
   "-p",
@@ -299,14 +303,14 @@ class AntigravityProcessClient {
           return safeResolve({
             conversationId: finalConversationId,
             response: resultEvent.response ?? "",
-            status: resultEvent.status ?? "SUCCESS",
+            status: resultEvent.status || "SUCCESS",
             numTurns: resultEvent.num_turns ?? 1,
             usage: resultEvent.usage ?? {},
             exitCode: code,
           });
         }
 
-        if (code !== 0) {
+        if (code !== 0 && !resultEvent) {
           const errDetail = stderrBuffer.trim() || `exit code ${code}`;
           return safeReject(new Error(`antigravity exited with code ${code}: ${errDetail}`));
         }
@@ -316,23 +320,12 @@ class AntigravityProcessClient {
           return safeReject(new Error(`antigravity process exited without emitting a result event${errDetail}`));
         }
 
-        if (resultEvent.status !== "SUCCESS") {
-          const statusText = resultEvent.response || resultEvent.error || `status ${resultEvent.status}`;
-          return safeReject(new Error(`antigravity turn failed with ${statusText}`));
-        }
-
         if (!finalConversationId) {
           return safeReject(new Error("antigravity process completed but did not provide a conversation ID"));
         }
 
-        safeResolve({
-          conversationId: finalConversationId,
-          response: resultEvent.response ?? "",
-          status: resultEvent.status ?? "SUCCESS",
-          numTurns: resultEvent.num_turns ?? 1,
-          usage: resultEvent.usage ?? {},
-          exitCode: code,
-        });
+        const failureMessage = formatResultFailureReason(resultEvent, code);
+        return safeReject(new Error(failureMessage));
       });
     });
   }
@@ -350,16 +343,6 @@ class AntigravityProcessClient {
   async close() {
     await this.cancel();
   }
-}
-
-function isSuccessfulResultEvent(resultEvent, finalConversationId) {
-  if (!resultEvent || typeof resultEvent !== "object") {
-    return false;
-  }
-  if (!finalConversationId || typeof finalConversationId !== "string" || !finalConversationId.trim()) {
-    return false;
-  }
-  return resultEvent.status === "SUCCESS";
 }
 
 function summarizeStderr(stderr, maxLength = 200) {

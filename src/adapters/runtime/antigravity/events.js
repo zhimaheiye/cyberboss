@@ -52,7 +52,7 @@ function mapAntigravityMessageToRuntimeEvents(raw, context = {}) {
         });
       }
 
-      if (status === "SUCCESS") {
+      if (isSuccessfulResultEvent(result, threadId)) {
         const responseText = typeof result.response === "string" ? result.response.trim() : "";
         if (responseText) {
           events.push({
@@ -74,11 +74,7 @@ function mapAntigravityMessageToRuntimeEvents(raw, context = {}) {
           },
         });
       } else {
-        const errorText =
-          (typeof result.response === "string" && result.response.trim()) ||
-          result.error ||
-          result.message ||
-          `Antigravity turn failed with status ${status || "UNKNOWN"}`;
+        const errorText = formatResultFailureReason(result, 0);
 
         events.push({
           type: "runtime.turn.failed",
@@ -135,8 +131,98 @@ function extractBlockedPersistentTool(raw) {
   return null;
 }
 
+const KNOWN_SUCCESS_STATUSES = new Set(["SUCCESS", "DONE", "COMPLETED"]);
+const KNOWN_FAILURE_STATUSES = new Set(["FAILED", "ERROR", "FAILURE", "CANCELLED", "CANCELED"]);
+
+function normalizeStatus(status) {
+  if (typeof status !== "string") {
+    return "";
+  }
+  return status.trim().toUpperCase();
+}
+
+function extractResultError(resultEvent) {
+  if (!resultEvent || typeof resultEvent !== "object") {
+    return "";
+  }
+  if (typeof resultEvent.error === "string") {
+    return resultEvent.error.trim();
+  }
+  if (resultEvent.error && typeof resultEvent.error === "object") {
+    if (typeof resultEvent.error.message === "string") {
+      return resultEvent.error.message.trim();
+    }
+    try {
+      const serialized = JSON.stringify(resultEvent.error);
+      return serialized === "{}" ? "" : serialized;
+    } catch {
+      return String(resultEvent.error);
+    }
+  }
+  return "";
+}
+
+function isSuccessfulResultEvent(resultEvent, finalConversationId) {
+  if (!resultEvent || typeof resultEvent !== "object") {
+    return false;
+  }
+  if (!finalConversationId || typeof finalConversationId !== "string" || !finalConversationId.trim()) {
+    return false;
+  }
+  const errorText = extractResultError(resultEvent);
+  if (errorText) {
+    return false;
+  }
+  const normalizedStatus = normalizeStatus(resultEvent.status);
+  if (KNOWN_FAILURE_STATUSES.has(normalizedStatus)) {
+    return false;
+  }
+  if (KNOWN_SUCCESS_STATUSES.has(normalizedStatus)) {
+    return true;
+  }
+  if (!normalizedStatus) {
+    return resultEvent.response !== undefined;
+  }
+  // Unknown non-empty status (e.g., WEIRD_STATE) is rejected
+  return false;
+}
+
+function formatResultFailureReason(resultEvent, code = 0) {
+  if (!resultEvent || typeof resultEvent !== "object") {
+    return code !== 0 ? `antigravity process exited with code ${code}` : "antigravity turn failed";
+  }
+  const normalizedStatus = normalizeStatus(resultEvent.status);
+  const errorDetail = extractResultError(resultEvent);
+
+  if (KNOWN_FAILURE_STATUSES.has(normalizedStatus)) {
+    const detail = errorDetail || "unknown error";
+    return `antigravity turn failed with status ${resultEvent.status}: ${detail}`;
+  }
+
+  if (errorDetail) {
+    return `antigravity turn failed: ${errorDetail}`;
+  }
+
+  if (normalizedStatus) {
+    return `antigravity returned unsupported result status "${resultEvent.status}"`;
+  }
+
+  if (resultEvent.response === undefined) {
+    return "antigravity result event missing response";
+  }
+
+  return `antigravity turn failed${code !== 0 ? ` with exit code ${code}` : ""}`;
+}
+
 module.exports = {
   mapAntigravityMessageToRuntimeEvents,
   extractBlockedPersistentTool,
   BLOCKED_PERSISTENT_TOOLS: Array.from(BLOCKED_PERSISTENT_TOOLS),
+  isSuccessfulResultEvent,
+  formatResultFailureReason,
+  extractResultError,
+  normalizeStatus,
+  KNOWN_SUCCESS_STATUSES,
+  KNOWN_FAILURE_STATUSES,
 };
+

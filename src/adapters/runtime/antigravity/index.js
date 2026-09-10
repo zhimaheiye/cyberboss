@@ -1,7 +1,11 @@
 const { AntigravityProcessClient } = require("./process-client");
 const { SessionStore } = require("../codex/session-store");
 const { buildOpeningTurnText, buildInstructionRefreshText } = require("../shared-instructions");
-const { mapAntigravityMessageToRuntimeEvents } = require("./events");
+const {
+  mapAntigravityMessageToRuntimeEvents,
+  isSuccessfulResultEvent,
+  formatResultFailureReason,
+} = require("./events");
 const { ensureAntigravityGlobalMcpConfig } = require("./mcp-settings");
 const path = require("path");
 
@@ -138,22 +142,24 @@ function createAntigravityRuntimeAdapter(config = {}) {
         sessionStore.setThreadIdForWorkspace(bindingKey, normalizedWorkspace, turnResult.conversationId, metadata);
       }
 
-      if (turnResult.status !== "SUCCESS") {
+      const finalThreadId = turnResult.conversationId || observedConversationId || threadId;
+      if (!isSuccessfulResultEvent(turnResult, finalThreadId)) {
+        const failureMessage = formatResultFailureReason(turnResult);
         if (!terminalRuntimeEventEmitted) {
           terminalRuntimeEventEmitted = true;
           emitRuntimeEvent(
             {
               type: "runtime.turn.failed",
               payload: {
-                threadId: turnResult.conversationId || observedConversationId || threadId,
+                threadId: finalThreadId,
                 turnId,
-                text: turnResult.response || `Antigravity turn failed with status ${turnResult.status}`,
+                text: failureMessage,
               },
             },
             null
           );
         }
-        throw new Error(`Antigravity turn failed with status ${turnResult.status}: ${turnResult.response || ""}`);
+        throw new Error(failureMessage);
       }
 
       return {

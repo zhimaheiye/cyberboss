@@ -35,11 +35,83 @@ async function main() {
       process.exit(1);
       break;
 
-    case "no_result_exit_1":
+    // 3. status missing + valid response + conversationId + exit 0
+    case "status_missing_exit_0":
       console.log(JSON.stringify({ event: "init", conversation_id: "conv-123" }));
       await sleep(20);
-      process.stderr.write("fatal error: crashed before emitting result\n");
+      console.log(JSON.stringify({
+        event: "result",
+        result: {
+          conversation_id: "conv-123",
+          response: "{\"action\":\"silent\"}",
+          num_turns: 1,
+          usage: { total_tokens: 15 }
+        }
+      }));
+      process.exit(0);
+      break;
+
+    // 4. status missing + valid response + teardown exit 1
+    case "status_missing_exit_1":
+      console.log(JSON.stringify({ event: "init", conversation_id: "conv-123" }));
+      await sleep(20);
+      console.log(JSON.stringify({
+        event: "result",
+        result: {
+          conversation_id: "conv-123",
+          response: "{\"action\":\"send_message\",\"message\":\"醒啦？今天这一觉睡得挺沉\"}",
+          num_turns: 1,
+          usage: { total_tokens: 25 }
+        }
+      }));
+      process.stderr.write('Failed to close MCP instance "fastctx": exit status 1\nLanguage server shutdown timed out\n');
       process.exit(1);
+      break;
+
+    // 5. Confirmed success statuses: DONE and COMPLETED
+    case "status_done_exit_0":
+      console.log(JSON.stringify({ event: "init", conversation_id: "conv-123" }));
+      await sleep(20);
+      console.log(JSON.stringify({
+        event: "result",
+        result: {
+          conversation_id: "conv-123",
+          status: "DONE",
+          response: "done status result",
+          num_turns: 1
+        }
+      }));
+      process.exit(0);
+      break;
+
+    case "status_completed_exit_0":
+      console.log(JSON.stringify({ event: "init", conversation_id: "conv-123" }));
+      await sleep(20);
+      console.log(JSON.stringify({
+        event: "result",
+        result: {
+          conversation_id: "conv-123",
+          status: "COMPLETED",
+          response: "completed status result",
+          num_turns: 1
+        }
+      }));
+      process.exit(0);
+      break;
+
+    // 6. FAILED + response
+    case "failed_result_exit_0":
+      console.log(JSON.stringify({ event: "init", conversation_id: "conv-123" }));
+      await sleep(20);
+      console.log(JSON.stringify({
+        event: "result",
+        result: {
+          conversation_id: "conv-123",
+          status: "FAILED",
+          response: "{\"action\":\"silent\"}"
+        }
+      }));
+      process.exit(0);
       break;
 
     case "failed_result_exit_1":
@@ -57,13 +129,53 @@ async function main() {
       process.exit(1);
       break;
 
-    case "malformed_stdout":
+    // 7. ERROR + error
+    case "error_result_exit_1":
       console.log(JSON.stringify({ event: "init", conversation_id: "conv-123" }));
       await sleep(20);
-      console.log("NOT_JSON_OUTPUT_LINE_HERE");
+      console.log(JSON.stringify({
+        event: "result",
+        result: {
+          conversation_id: "conv-123",
+          status: "ERROR",
+          error: "internal language server error"
+        }
+      }));
+      process.stderr.write("language server internal error\n");
       process.exit(1);
       break;
 
+    // 8. Unknown non-empty status: WEIRD_STATE
+    case "unsupported_status_weird":
+      console.log(JSON.stringify({ event: "init", conversation_id: "conv-123" }));
+      await sleep(20);
+      console.log(JSON.stringify({
+        event: "result",
+        result: {
+          conversation_id: "conv-123",
+          status: "WEIRD_STATE",
+          response: "some unexpected state payload"
+        }
+      }));
+      process.exit(0);
+      break;
+
+    // 9. No result + exit 0
+    case "no_result_exit_0":
+      console.log(JSON.stringify({ event: "init", conversation_id: "conv-123" }));
+      await sleep(20);
+      process.exit(0);
+      break;
+
+    // 10. No result + exit 1
+    case "no_result_exit_1":
+      console.log(JSON.stringify({ event: "init", conversation_id: "conv-123" }));
+      await sleep(20);
+      process.stderr.write("fatal error: crashed before emitting result\n");
+      process.exit(1);
+      break;
+
+    // 11. Conversation mismatch
     case "conversation_mismatch":
       console.log(JSON.stringify({ event: "init", conversation_id: "conv-unexpected-999" }));
       await sleep(20);
@@ -78,6 +190,15 @@ async function main() {
       process.exit(0);
       break;
 
+    // 12. Malformed stdout
+    case "malformed_stdout":
+      console.log(JSON.stringify({ event: "init", conversation_id: "conv-123" }));
+      await sleep(20);
+      console.log("NOT_JSON_OUTPUT_LINE_HERE");
+      process.exit(1);
+      break;
+
+    // 13. Blocked persistent tool
     case "blocked_tool":
       console.log(JSON.stringify({ event: "init", conversation_id: "conv-123" }));
       await sleep(20);
