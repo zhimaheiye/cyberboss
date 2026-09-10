@@ -1,4 +1,6 @@
 const { spawn } = require("child_process");
+const fs = require("fs");
+const path = require("path");
 
 class ClaudeCodeProcessClient {
   constructor({ command = "claude", cwd, env, model = "", permissionMode = "default", disableVerbose = false, extraArgs = [], mcpConfigPaths = [], ipcServer = null, workspaceRoot = "" }) {
@@ -63,12 +65,46 @@ class ClaudeCodeProcessClient {
     console.log(
       `[claudecode-runtime] launching command=${this.command} cwd=${this.cwd} mcp_config=${mcpLabel}`
     );
-    const child = spawn(this.command, args, {
-      cwd: this.cwd,
-      env: this.env,
-      stdio: ["pipe", "pipe", "pipe"],
-      shell: false,
-    });
+
+    let spawnTarget;
+    try {
+      spawnTarget = prepareClaudeSpawn({
+        command: this.command,
+        args,
+        env: this.env,
+      });
+    } catch (err) {
+      this.rejectSessionWaiters(err);
+      this.emit({
+        type: "process.error",
+        error: err.message,
+        sessionId: this.activeThreadId || this.sessionId,
+        turnId: this.pendingTurnId,
+      }, null);
+      throw err;
+    }
+
+    const { spawnCommand, spawnArgs, spawnOptions } = spawnTarget;
+
+    let child;
+    try {
+      child = spawn(spawnCommand, spawnArgs, {
+        cwd: this.cwd,
+        env: this.env,
+        stdio: ["pipe", "pipe", "pipe"],
+        ...spawnOptions,
+      });
+    } catch (err) {
+      this.rejectSessionWaiters(err);
+      this.emit({
+        type: "process.error",
+        error: err.message,
+        sessionId: this.activeThreadId || this.sessionId,
+        turnId: this.pendingTurnId,
+      }, null);
+      throw err;
+    }
+
     this.child = child;
     this.stdin = child.stdin;
     this.alive = true;
@@ -441,4 +477,164 @@ function isPotentiallySensitive(text) {
   return SENSITIVE_KEYWORDS.test(text) || SENSITIVE_PATTERNS.test(text);
 }
 
-module.exports = { ClaudeCodeProcessClient };
+function isBatchScript(filePath) {
+  if (typeof filePath !== "string") return false;
+  const ext = path.extname(filePath).toLowerCase();
+  return ext === ".cmd" || ext === ".bat";
+}
+
+function isExecutable(filePath) {
+  if (typeof filePath !== "string") return false;
+  const ext = path.extname(filePath).toLowerCase();
+  return ext === ".exe" || ext === ".com";
+}
+
+function resolveWindowsCommand(command, env = process.env) {
+  const trimmed = typeof command === "string" ? command.trim() : "";
+  if (!trimmed) {
+    throw new Error("Claude Code command is not specified");
+  }
+
+  const rawPathext = (env && typeof env.PATHEXT === "string") ? env.PATHEXT : (process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD");
+  const pathextList = rawPathext.split(";").map((ext) => ext.trim()).filter(Boolean);
+
+  // If command contains path separators, resolve directly
+  if (trimmed.includes("\\") || trimmed.includes("/")) {
+    if (fs.existsSync(trimmed)) {
+      const resolved = path.resolve(trimmed);
+      return {
+        resolvedPath: resolved,
+        isBatch: isBatchScript(resolved),
+        isExe: isExecutable(resolved),
+      };
+    }
+
+    for (const ext of pathextList) {
+      const candidate = `${trimmed}${ext}`;
+      if (fs.existsSync(candidate)) {
+        const resolved = path.resolve(candidate);
+        return {
+          resolvedPath: resolved,
+          isBatch: isBatchScript(resolved),
+          isExe: isExecutable(resolved),
+        };
+      }
+    }
+
+    throw new Error(`Claude Code command not found: ${trimmed}`);
+  }
+
+  // Bare command name: search PATH
+  const rawPath = (env && typeof env.PATH === "string") ? env.PATH : (process.env.PATH || "");
+  const pathDirs = rawPath
+    .split(";")
+    .map((dir) => dir.trim().replace(/^"(.*)"$/, "$1"))
+    .filter(Boolean);
+
+  const hasExt = Boolean(path.extname(trimmed));
+
+  for (const dir of pathDirs) {
+    if (hasExt) {
+      const candidate = path.join(dir, trimmed);
+      if (fs.existsSync(candidate)) {
+        const resolved = path.resolve(candidate);
+        return {
+          resolvedPath: resolved,
+          isBatch: isBatchScript(resolved),
+          isExe: isExecutable(resolved),
+        };
+      }
+    } else {
+      for (const ext of pathextList) {
+        const candidate = path.join(dir, `${trimmed}${ext}`);
+        if (fs.existsSync(candidate)) {
+          const resolved = path.resolve(candidate);
+          return {
+            resolvedPath: resolved,
+            isBatch: isBatchScript(resolved),
+            isExe: isExecutable(resolved),
+          };
+        }
+      }
+      const exactCandidate = path.join(dir, trimmed);
+      if (fs.existsSync(exactCandidate)) {
+        const resolved = path.resolve(exactCandidate);
+        return {
+          resolvedPath: resolved,
+          isBatch: isBatchScript(resolved),
+          isExe: isExecutable(resolved),
+        };
+      }
+    }
+  }
+
+  throw new Error(`Claude Code command not found: ${trimmed}`);
+}
+
+function resolveClaudeCommand({ command, env = process.env, platform = process.platform } = {}) {
+  const trimmed = typeof command === "string" ? command.trim() : "";
+  if (!trimmed) {
+    throw new Error("Claude Code command is not specified");
+  }
+
+  if (platform !== "win32") {
+    return {
+      resolvedPath: trimmed,
+      isBatch: false,
+      isExe: false,
+    };
+  }
+
+  return resolveWindowsCommand(trimmed, env);
+}
+
+function quoteCmdArg(arg) {
+  const str = String(arg ?? "");
+  if (!str) {
+    return '""';
+  }
+  if (!/[\s"]/.test(str)) {
+    return str;
+  }
+  let escaped = str.replace(/(\\*)"/g, '$1$1\\"');
+  escaped = escaped.replace(/(\\+)$/g, '$1$1');
+  return `"${escaped}"`;
+}
+
+function prepareClaudeSpawn({ command, args = [], env = process.env, platform = process.platform } = {}) {
+  const resolved = resolveClaudeCommand({ command, env, platform });
+
+  if (platform !== "win32" || !resolved.isBatch) {
+    return {
+      spawnCommand: resolved.resolvedPath,
+      spawnArgs: Array.isArray(args) ? [...args] : [],
+      spawnOptions: { shell: false },
+      resolved,
+    };
+  }
+
+  const comspec = (env && typeof env.ComSpec === "string" && env.ComSpec.trim())
+    || (process.env.ComSpec && process.env.ComSpec.trim())
+    || "cmd.exe";
+
+  const safeArgs = Array.isArray(args) ? args : [];
+  const innerCommandLine = [quoteCmdArg(resolved.resolvedPath), ...safeArgs.map(quoteCmdArg)].join(" ");
+  const fullCommandLine = `"${innerCommandLine}"`;
+
+  return {
+    spawnCommand: comspec,
+    spawnArgs: ["/d", "/s", "/c", fullCommandLine],
+    spawnOptions: {
+      windowsVerbatimArguments: true,
+      shell: false,
+    },
+    resolved,
+  };
+}
+
+module.exports = {
+  ClaudeCodeProcessClient,
+  resolveClaudeCommand,
+  prepareClaudeSpawn,
+  quoteCmdArg,
+};
