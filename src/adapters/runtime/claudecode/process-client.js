@@ -19,6 +19,8 @@ class ClaudeCodeProcessClient {
     this.stdoutBuffer = "";
     this.listeners = new Set();
     this.pendingTurnId = "";
+    this.activeTurnCompleted = false;
+    this.lastCompletedTurnId = "";
     this.sessionId = "";
     this.resumeSessionId = "";
     this.activeThreadId = "";
@@ -51,6 +53,9 @@ class ClaudeCodeProcessClient {
     this.sessionId = "";
     this.resumeSessionId = isValidSessionId(resumeSessionId) ? resumeSessionId : "";
     this.activeThreadId = "";
+    this.pendingTurnId = "";
+    this.activeTurnCompleted = false;
+    this.stdoutBuffer = "";
     const args = buildArgs({
       model: this.model,
       permissionMode: this.permissionMode,
@@ -133,10 +138,24 @@ class ClaudeCodeProcessClient {
       this.alive = false;
       this.child = null;
       this.stdin = null;
-      this.emit({ type: "process.error", error: err.message, sessionId: this.activeThreadId || this.sessionId, turnId: this.pendingTurnId }, null);
+      const targetSessionId = this.activeThreadId || this.sessionId;
+      const turnId = this.pendingTurnId;
+      this.pendingTurnId = "";
+      this.activeThreadId = "";
+      this.emit({
+        type: "process.error",
+        error: err.message,
+        sessionId: targetSessionId,
+        turnId,
+      }, null);
     });
 
     child.on("close", (code) => {
+      if (this.stdoutBuffer && this.stdoutBuffer.trim()) {
+        const remaining = this.stdoutBuffer.trim();
+        this.stdoutBuffer = "";
+        this.handleLine(remaining);
+      }
       this.rejectSessionWaiters(new Error(`claudecode process closed with code ${code ?? "unknown"}`));
       this.alive = false;
       this.child = null;
@@ -145,7 +164,38 @@ class ClaudeCodeProcessClient {
         this.suppressNextCloseEvent = false;
         return;
       }
-      this.emit({ type: "process.close", code, sessionId: this.activeThreadId || this.sessionId, turnId: this.pendingTurnId }, null);
+
+      const hadPendingTurn = Boolean(this.pendingTurnId && !this.activeTurnCompleted);
+      const pendingTurnId = this.pendingTurnId;
+      const targetSessionId = this.activeThreadId || this.sessionId;
+
+      this.pendingTurnId = "";
+      this.activeThreadId = "";
+
+      if (hadPendingTurn) {
+        this.emit({
+          type: "process.close",
+          code,
+          sessionId: targetSessionId,
+          turnId: pendingTurnId,
+        }, null);
+      } else {
+        if (code !== 0 && code !== null) {
+          console.warn(
+            `[claudecode-runtime] process exited with code ${code} after turn completion or while idle`
+          );
+        } else {
+          console.log(
+            `[claudecode-runtime] process exited normally (code=${code ?? 0}) after turn completion or while idle`
+          );
+        }
+        this.emit({
+          type: "process.exit",
+          code,
+          sessionId: targetSessionId,
+          lastCompletedTurnId: this.lastCompletedTurnId,
+        }, null);
+      }
     });
   }
 
@@ -253,10 +303,14 @@ class ClaudeCodeProcessClient {
         return;
       }
     }
+    const completedTurnId = this.pendingTurnId;
+    this.lastCompletedTurnId = completedTurnId;
+    this.activeTurnCompleted = true;
+    const completedSessionId = this.activeThreadId || this.sessionId;
     this.emit({
       type: "turn.completed",
-      turnId: this.pendingTurnId,
-      sessionId: this.activeThreadId || this.sessionId,
+      turnId: completedTurnId,
+      sessionId: completedSessionId,
       text: typeof raw.result === "string" ? raw.result.trim() : "",
     }, raw);
     this.pendingTurnId = "";
@@ -313,6 +367,7 @@ class ClaudeCodeProcessClient {
       throw new Error("claudecode process not running");
     }
     this.pendingTurnId = `turn-${Date.now()}`;
+    this.activeTurnCompleted = false;
     this.activeThreadId = threadId || this.sessionId;
     if (this.ipcServer) {
       this.ipcServer.broadcast({
@@ -372,6 +427,7 @@ class ClaudeCodeProcessClient {
 
   async close() {
     if (!this.child) return;
+    this.suppressNextCloseEvent = true;
     if (this.stdin && !this.stdin.destroyed) {
       this.stdin.end();
     }
@@ -402,6 +458,8 @@ class ClaudeCodeProcessClient {
     this.resumeSessionId = "";
     this.activeThreadId = "";
     this.pendingTurnId = "";
+    this.activeTurnCompleted = false;
+    this.lastCompletedTurnId = "";
     this.rejectSessionWaiters(new Error("claudecode process closed"));
   }
 

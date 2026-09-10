@@ -11,6 +11,7 @@ const {
   prepareClaudeSpawn,
   quoteCmdArg,
 } = require("../src/adapters/runtime/claudecode/process-client");
+const { mapClaudeCodeMessageToRuntimeEvent } = require("../src/adapters/runtime/claudecode/events");
 
 test("win32: command=claude, PATH only has claude.cmd -> resolves cmd shim", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cb-claude-shim-"));
@@ -294,3 +295,354 @@ test("Windows machine verification: resolveClaudeCommand resolves current claude
   assert.match(resolved.resolvedPath, /claude\.cmd$/i);
   assert.ok(fs.existsSync(resolved.resolvedPath));
 });
+
+function createFakeClaudeScript(tmpDir, scriptBody) {
+  const isWin = process.platform === "win32";
+  const nodeScript = path.join(tmpDir, "fake.js");
+  fs.writeFileSync(nodeScript, scriptBody);
+  const scriptFile = isWin ? path.join(tmpDir, "fake.cmd") : path.join(tmpDir, "fake.sh");
+  if (isWin) {
+    fs.writeFileSync(scriptFile, `@echo off\r\nnode "${nodeScript}" %*\r\n`);
+  } else {
+    fs.writeFileSync(scriptFile, `#!/bin/sh\nnode "${nodeScript}" "$@"\n`);
+    fs.chmodSync(scriptFile, 0o755);
+  }
+  return scriptFile;
+}
+
+test("lifecycle 1: turn started -> valid result -> process exit code 0 -> turn.completed, no runtime.turn.failed", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cb-life-1-"));
+  try {
+    const scriptFile = createFakeClaudeScript(tmpDir, `
+      const readline = require("readline");
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false });
+      process.stdout.write(JSON.stringify({ type: "system", session_id: "00000000-0000-4000-8000-000000000001" }) + "\\n");
+      rl.on("line", (line) => {
+        const msg = JSON.parse(line);
+        if (msg.type === "user") {
+          process.stdout.write(JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "ok reply" }] } }) + "\\n");
+          process.stdout.write(JSON.stringify({ type: "result", session_id: "00000000-0000-4000-8000-000000000001", result: "ok reply" }) + "\\n");
+          setTimeout(() => process.exit(0), 50);
+        }
+      });
+    `);
+
+    const client = new ClaudeCodeProcessClient({
+      command: scriptFile,
+      cwd: tmpDir,
+    });
+
+    const clientEvents = [];
+    const runtimeEvents = [];
+    client.onMessage((event, raw) => {
+      clientEvents.push(event);
+      const mapped = mapClaudeCodeMessageToRuntimeEvent(event, raw);
+      if (mapped) runtimeEvents.push(mapped);
+    });
+
+    await client.connect();
+    await client.waitForSessionId();
+    await client.sendUserMessage({ text: "hi", threadId: "00000000-0000-4000-8000-000000000001" });
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    const completedEvent = clientEvents.find((e) => e.type === "turn.completed");
+    assert.ok(completedEvent, "Must emit turn.completed");
+    assert.equal(completedEvent.text, "ok reply");
+
+    const exitEvent = clientEvents.find((e) => e.type === "process.exit");
+    assert.ok(exitEvent, "Must emit process.exit");
+    assert.equal(exitEvent.code, 0);
+
+    const closeEvent = clientEvents.find((e) => e.type === "process.close");
+    assert.equal(closeEvent, undefined, "Must NOT emit process.close on completed turn");
+
+    assert.ok(runtimeEvents.some((e) => e.type === "runtime.turn.completed"));
+    assert.equal(runtimeEvents.some((e) => e.type === "runtime.turn.failed"), false, "Must NOT have runtime.turn.failed");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("lifecycle 2: turn started -> valid result -> process exit code 1 -> completed reply not marked as failed", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cb-life-2-"));
+  try {
+    const scriptFile = createFakeClaudeScript(tmpDir, `
+      const readline = require("readline");
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false });
+      process.stdout.write(JSON.stringify({ type: "system", session_id: "00000000-0000-4000-8000-000000000002" }) + "\\n");
+      rl.on("line", (line) => {
+        const msg = JSON.parse(line);
+        if (msg.type === "user") {
+          process.stdout.write(JSON.stringify({ type: "result", session_id: "00000000-0000-4000-8000-000000000002", result: "done reply" }) + "\\n");
+          setTimeout(() => process.exit(1), 50);
+        }
+      });
+    `);
+
+    const client = new ClaudeCodeProcessClient({
+      command: scriptFile,
+      cwd: tmpDir,
+    });
+
+    const clientEvents = [];
+    const runtimeEvents = [];
+    client.onMessage((event, raw) => {
+      clientEvents.push(event);
+      const mapped = mapClaudeCodeMessageToRuntimeEvent(event, raw);
+      if (mapped) runtimeEvents.push(mapped);
+    });
+
+    await client.connect();
+    await client.waitForSessionId();
+    await client.sendUserMessage({ text: "hi", threadId: "00000000-0000-4000-8000-000000000002" });
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    const completedEvent = clientEvents.find((e) => e.type === "turn.completed");
+    assert.ok(completedEvent, "Must emit turn.completed");
+
+    const exitEvent = clientEvents.find((e) => e.type === "process.exit");
+    assert.ok(exitEvent, "Must emit process.exit");
+    assert.equal(exitEvent.code, 1);
+
+    const closeEvent = clientEvents.find((e) => e.type === "process.close");
+    assert.equal(closeEvent, undefined, "Must NOT emit process.close when turn completed");
+
+    assert.equal(runtimeEvents.some((e) => e.type === "runtime.turn.failed"), false, "Must NOT produce user turn failure");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("lifecycle 3: turn started -> no result -> process exit code 1 -> must emit runtime.turn.failed", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cb-life-3-"));
+  try {
+    const scriptFile = createFakeClaudeScript(tmpDir, `
+      const readline = require("readline");
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false });
+      process.stdout.write(JSON.stringify({ type: "system", session_id: "00000000-0000-4000-8000-000000000003" }) + "\\n");
+      rl.on("line", (line) => {
+        const msg = JSON.parse(line);
+        if (msg.type === "user") {
+          setTimeout(() => process.exit(1), 50);
+        }
+      });
+    `);
+
+    const client = new ClaudeCodeProcessClient({
+      command: scriptFile,
+      cwd: tmpDir,
+    });
+
+    const clientEvents = [];
+    const runtimeEvents = [];
+    client.onMessage((event, raw) => {
+      clientEvents.push(event);
+      const mapped = mapClaudeCodeMessageToRuntimeEvent(event, raw);
+      if (mapped) runtimeEvents.push(mapped);
+    });
+
+    await client.connect();
+    await client.waitForSessionId();
+    await client.sendUserMessage({ text: "hi", threadId: "00000000-0000-4000-8000-000000000003" });
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    assert.equal(clientEvents.some((e) => e.type === "turn.completed"), false);
+
+    const closeEvent = clientEvents.find((e) => e.type === "process.close");
+    assert.ok(closeEvent, "Must emit process.close on uncompleted turn");
+    assert.equal(closeEvent.code, 1);
+    assert.ok(closeEvent.turnId, "Must include pending turnId");
+
+    const failedEvent = runtimeEvents.find((e) => e.type === "runtime.turn.failed");
+    assert.ok(failedEvent, "Must produce runtime.turn.failed");
+    assert.match(failedEvent.payload.text, /Runtime process exited unexpectedly/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("lifecycle 4: process error during pending turn -> must produce failure", async () => {
+  const client = new ClaudeCodeProcessClient({
+    command: "claude",
+    cwd: "/workspace",
+  });
+  client.alive = true;
+  client.stdin = { write: () => {} };
+  client.sessionId = "00000000-0000-4000-8000-000000000004";
+
+  const clientEvents = [];
+  const runtimeEvents = [];
+  client.onMessage((event, raw) => {
+    clientEvents.push(event);
+    const mapped = mapClaudeCodeMessageToRuntimeEvent(event, raw);
+    if (mapped) runtimeEvents.push(mapped);
+  });
+
+  await client.sendUserMessage({ text: "hi", threadId: "00000000-0000-4000-8000-000000000004" });
+  const turnId = client.pendingTurnId;
+  assert.ok(turnId);
+
+  // Trigger error event as child.on("error") would
+  client.rejectSessionWaiters(new Error("IO error occurred"));
+  client.alive = false;
+  client.child = null;
+  client.stdin = null;
+  client.pendingTurnId = "";
+  client.emit({
+    type: "process.error",
+    error: "IO error occurred",
+    sessionId: client.sessionId,
+    turnId,
+  }, null);
+
+  const errorEvent = clientEvents.find((e) => e.type === "process.error");
+  assert.ok(errorEvent);
+  assert.equal(errorEvent.turnId, turnId);
+
+  const failedEvent = runtimeEvents.find((e) => e.type === "runtime.turn.failed");
+  assert.ok(failedEvent);
+  assert.equal(failedEvent.payload.text, "IO error occurred");
+  assert.equal(failedEvent.payload.turnId, turnId);
+});
+
+test("lifecycle 5: successful turn then process close -> client alive=false, child=null, stdin=null", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cb-life-5-"));
+  try {
+    const scriptFile = createFakeClaudeScript(tmpDir, `
+      const readline = require("readline");
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false });
+      process.stdout.write(JSON.stringify({ type: "system", session_id: "00000000-0000-4000-8000-000000000005" }) + "\\n");
+      rl.on("line", (line) => {
+        const msg = JSON.parse(line);
+        if (msg.type === "user") {
+          process.stdout.write(JSON.stringify({ type: "result", session_id: "00000000-0000-4000-8000-000000000005", result: "all good" }) + "\\n");
+          setTimeout(() => process.exit(0), 50);
+        }
+      });
+    `);
+
+    const client = new ClaudeCodeProcessClient({
+      command: scriptFile,
+      cwd: tmpDir,
+    });
+
+    await client.connect();
+    assert.equal(client.alive, true);
+    assert.ok(client.child);
+    assert.ok(client.stdin);
+
+    await client.waitForSessionId();
+    await client.sendUserMessage({ text: "hi", threadId: "00000000-0000-4000-8000-000000000005" });
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    assert.equal(client.alive, false, "client.alive must be false after process exit");
+    assert.equal(client.child, null, "client.child must be null");
+    assert.equal(client.stdin, null, "client.stdin must be null");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("lifecycle 6: next turn after process close -> can reconnect and resume session correctly", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cb-life-6-"));
+  try {
+    const logFile = path.join(tmpDir, "spawns.log");
+    const scriptFile = createFakeClaudeScript(tmpDir, `
+      const fs = require("fs");
+      const readline = require("readline");
+      fs.appendFileSync(${JSON.stringify(logFile)}, "spawn:" + process.argv.slice(2).join(" ") + "\\n");
+      const resumeArgIndex = process.argv.indexOf("--resume");
+      const resumeId = resumeArgIndex !== -1 ? process.argv[resumeArgIndex + 1] : "00000000-0000-4000-8000-000000000006";
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false });
+      process.stdout.write(JSON.stringify({ type: "system", session_id: resumeId }) + "\\n");
+      rl.on("line", (line) => {
+        const msg = JSON.parse(line);
+        if (msg.type === "user") {
+          process.stdout.write(JSON.stringify({ type: "result", session_id: resumeId, result: "reply to: " + msg.message.content }) + "\\n");
+          setTimeout(() => process.exit(0), 50);
+        }
+      });
+    `);
+
+    const client = new ClaudeCodeProcessClient({
+      command: scriptFile,
+      cwd: tmpDir,
+    });
+
+    // Turn 1
+    await client.connect();
+    const sess1 = await client.waitForSessionId();
+    assert.equal(sess1, "00000000-0000-4000-8000-000000000006");
+    await client.sendUserMessage({ text: "msg1", threadId: sess1 });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(client.alive, false);
+
+    // Turn 2: reconnect with resumed session id
+    await client.connect(sess1);
+    assert.equal(client.alive, true);
+    assert.equal(client.resumeSessionId, sess1);
+    const sess2 = await client.waitForSessionId();
+    assert.equal(sess2, sess1);
+
+    const receivedResults = [];
+    client.onMessage((event) => {
+      if (event.type === "turn.completed") receivedResults.push(event);
+    });
+
+    await client.sendUserMessage({ text: "msg2", threadId: sess2 });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    assert.equal(receivedResults.length, 1);
+    assert.equal(receivedResults[0].text, "reply to: msg2");
+    assert.equal(receivedResults[0].sessionId, sess1);
+
+    // Verify second spawn had --resume
+    const spawnLog = fs.readFileSync(logFile, "utf8");
+    assert.match(spawnLog, /--resume 00000000-0000-4000-8000-000000000006/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("lifecycle 7: idle process close -> does not produce user turn failure", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cb-life-7-"));
+  try {
+    const scriptFile = createFakeClaudeScript(tmpDir, `
+      process.stdout.write(JSON.stringify({ type: "system", session_id: "00000000-0000-4000-8000-000000000007" }) + "\\n");
+      setTimeout(() => process.exit(0), 100);
+    `);
+
+    const client = new ClaudeCodeProcessClient({
+      command: scriptFile,
+      cwd: tmpDir,
+    });
+
+    const clientEvents = [];
+    const runtimeEvents = [];
+    client.onMessage((event, raw) => {
+      clientEvents.push(event);
+      const mapped = mapClaudeCodeMessageToRuntimeEvent(event, raw);
+      if (mapped) runtimeEvents.push(mapped);
+    });
+
+    await client.connect();
+    await client.waitForSessionId();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    assert.equal(client.alive, false);
+    const closeEvent = clientEvents.find((e) => e.type === "process.close");
+    assert.equal(closeEvent, undefined, "Idle close must NOT emit process.close");
+
+    const exitEvent = clientEvents.find((e) => e.type === "process.exit");
+    assert.ok(exitEvent, "Must emit process.exit");
+
+    assert.equal(runtimeEvents.some((e) => e.type === "runtime.turn.failed"), false, "Must NOT produce runtime.turn.failed");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
