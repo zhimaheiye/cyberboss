@@ -84,6 +84,9 @@ function createAntigravityRuntimeAdapter(config = {}) {
       env: process.env,
       extraArgs: configuredExtraArgs,
       timeoutMs: configuredTimeoutMs,
+      httpProxy: config.antigravityHttpProxy,
+      httpsProxy: config.antigravityHttpsProxy,
+      noProxy: config.antigravityNoProxy,
     });
 
     let observedConversationId = threadId;

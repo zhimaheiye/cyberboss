@@ -19,15 +19,38 @@ class AntigravityProcessClient {
     env = process.env,
     extraArgs = [],
     timeoutMs = 120_000,
+    httpProxy = "",
+    httpsProxy = "",
+    noProxy = "",
   } = {}) {
     this.command = command;
     this.cwd = cwd;
     this.env = env;
     this.extraArgs = Array.isArray(extraArgs) ? [...extraArgs] : [];
     this.timeoutMs = typeof timeoutMs === "number" && timeoutMs > 0 ? timeoutMs : 120_000;
+    this.httpProxy = typeof httpProxy === "string" ? httpProxy.trim() : "";
+    this.httpsProxy = typeof httpsProxy === "string" ? httpsProxy.trim() : "";
+    this.noProxy = typeof noProxy === "string" ? noProxy.trim() : "";
     this.child = null;
     this.running = false;
     this.listeners = new Set();
+  }
+
+  buildChildEnv() {
+    const childEnv = { ...this.env };
+    if (this.httpProxy) {
+      childEnv.HTTP_PROXY = this.httpProxy;
+      childEnv.http_proxy = this.httpProxy;
+    }
+    if (this.httpsProxy) {
+      childEnv.HTTPS_PROXY = this.httpsProxy;
+      childEnv.https_proxy = this.httpsProxy;
+    }
+    if (this.noProxy) {
+      childEnv.NO_PROXY = this.noProxy;
+      childEnv.no_proxy = this.noProxy;
+    }
+    return childEnv;
   }
 
   onMessage(listener) {
@@ -169,9 +192,10 @@ class AntigravityProcessClient {
       };
 
       try {
+        const childEnv = this.buildChildEnv();
         this.child = spawn(this.command, args, {
           cwd: this.cwd,
-          env: this.env,
+          env: childEnv,
           shell: false,
           stdio: ["ignore", "pipe", "pipe"],
         });
@@ -311,11 +335,17 @@ class AntigravityProcessClient {
         }
 
         if (code !== 0 && !resultEvent) {
+          if (isAntigravityAuthError(stderrBuffer)) {
+            return safeReject(new Error(AUTH_REQUIRED_MESSAGE));
+          }
           const errDetail = stderrBuffer.trim() || `exit code ${code}`;
           return safeReject(new Error(`antigravity exited with code ${code}: ${errDetail}`));
         }
 
         if (!resultEvent) {
+          if (isAntigravityAuthError(stderrBuffer)) {
+            return safeReject(new Error(AUTH_REQUIRED_MESSAGE));
+          }
           const errDetail = stderrBuffer.trim() ? ` (stderr: ${stderrBuffer.trim()})` : "";
           return safeReject(new Error(`antigravity process exited without emitting a result event${errDetail}`));
         }
@@ -325,6 +355,9 @@ class AntigravityProcessClient {
         }
 
         const failureMessage = formatResultFailureReason(resultEvent, code);
+        if (isAntigravityAuthError(failureMessage) || isAntigravityAuthError(stderrBuffer)) {
+          return safeReject(new Error(AUTH_REQUIRED_MESSAGE));
+        }
         return safeReject(new Error(failureMessage));
       });
     });
@@ -345,6 +378,15 @@ class AntigravityProcessClient {
   }
 }
 
+const AUTH_REQUIRED_MESSAGE = "AGY authentication required. Please sign in on the desktop.";
+
+function isAntigravityAuthError(text) {
+  if (typeof text !== "string") {
+    return false;
+  }
+  return /Authentication required|authentication failed or timed out|not logged into Antigravity/i.test(text);
+}
+
 function summarizeStderr(stderr, maxLength = 200) {
   if (typeof stderr !== "string") {
     return "";
@@ -353,7 +395,9 @@ function summarizeStderr(stderr, maxLength = 200) {
   if (!trimmed) {
     return "";
   }
-  const sanitized = trimmed.replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer <redacted>");
+  const sanitized = trimmed
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer <redacted>")
+    .replace(/https?:\/\/[^\s:@]+:[^\s:@]+@/gi, "http://<redacted>@");
   const singleLine = sanitized.replace(/\r?\n+/g, " | ");
   if (singleLine.length <= maxLength) {
     return singleLine;
@@ -363,6 +407,8 @@ function summarizeStderr(stderr, maxLength = 200) {
 
 module.exports = {
   AntigravityProcessClient,
+  AUTH_REQUIRED_MESSAGE,
+  isAntigravityAuthError,
   isSuccessfulResultEvent,
   summarizeStderr,
 };

@@ -194,6 +194,10 @@ function formatResultFailureReason(resultEvent, code = 0) {
   const normalizedStatus = normalizeStatus(resultEvent.status);
   const errorDetail = extractResultError(resultEvent);
 
+  if (isAntigravityAuthError(errorDetail)) {
+    return AUTH_REQUIRED_MESSAGE;
+  }
+
   if (KNOWN_FAILURE_STATUSES.has(normalizedStatus)) {
     const detail = errorDetail || "unknown error";
     return `antigravity turn failed with status ${resultEvent.status}: ${detail}`;
@@ -214,6 +218,15 @@ function formatResultFailureReason(resultEvent, code = 0) {
   return `antigravity turn failed${code !== 0 ? ` with exit code ${code}` : ""}`;
 }
 
+const AUTH_REQUIRED_MESSAGE = "AGY authentication required. Please sign in on the desktop.";
+
+function isAntigravityAuthError(text) {
+  if (typeof text !== "string") {
+    return false;
+  }
+  return /Authentication required|authentication failed or timed out|not logged into Antigravity/i.test(text);
+}
+
 module.exports = {
   mapAntigravityMessageToRuntimeEvents,
   extractBlockedPersistentTool,
@@ -224,5 +237,7 @@ module.exports = {
   normalizeStatus,
   KNOWN_SUCCESS_STATUSES,
   KNOWN_FAILURE_STATUSES,
+  AUTH_REQUIRED_MESSAGE,
+  isAntigravityAuthError,
 };
 

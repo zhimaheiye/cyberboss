@@ -83,6 +83,13 @@ function readConfig() {
     antigravityEffort: readTextEnv("CYBERBOSS_ANTIGRAVITY_EFFORT") || "",
     antigravityExtraArgs: readListEnv("CYBERBOSS_ANTIGRAVITY_EXTRA_ARGS"),
     antigravityTimeoutMs: readIntEnv("CYBERBOSS_ANTIGRAVITY_TIMEOUT_MS") || 120_000,
+    antigravityHttpProxy: readTextEnv("CYBERBOSS_ANTIGRAVITY_HTTP_PROXY"),
+    antigravityHttpsProxy: readTextEnv("CYBERBOSS_ANTIGRAVITY_HTTPS_PROXY"),
+    antigravityNoProxy:
+      readTextEnv("CYBERBOSS_ANTIGRAVITY_NO_PROXY") ||
+      (readTextEnv("CYBERBOSS_ANTIGRAVITY_HTTP_PROXY") || readTextEnv("CYBERBOSS_ANTIGRAVITY_HTTPS_PROXY")
+        ? "localhost,127.0.0.1,::1"
+        : ""),
     sessionsFile: path.join(stateDir, "sessions.json"),
     startWithCheckin: (mode === "start" && hasArgFlag(argv, "--checkin")) || readBoolEnv("CYBERBOSS_ENABLE_CHECKIN"),
   };
