@@ -55,15 +55,32 @@ async function main() {
   // For Claude: connect to the bridge's IPC socket so we can observe and
   // interact with the same ClaudeCode process that handles WeChat messages.
   const stateDir = process.env.CYBERBOSS_STATE_DIR || path.join(os.homedir(), ".cyberboss");
-  const socketPath = path.join(stateDir, "claudecode-runtime.sock");
+  const { resolveClaudeIpcEndpoint, resolveClaudeIpcTokenPath } = require("../src/adapters/runtime/claudecode/ipc-server");
+  const endpoint = resolveClaudeIpcEndpoint(stateDir);
+  const tokenFile = resolveClaudeIpcTokenPath(stateDir);
 
-  if (!fs.existsSync(socketPath)) {
-    console.error(`Claude IPC socket not found: ${socketPath}`);
+  if (process.platform !== "win32" && !fs.existsSync(endpoint)) {
+    console.error(`Claude IPC socket not found: ${endpoint}`);
     console.error("Make sure the bridge is running with CYBERBOSS_RUNTIME=claudecode.");
     process.exit(1);
   }
 
-  const socket = net.createConnection(socketPath);
+  // Authenticate with the IPC server
+  let authToken = "";
+  try {
+    authToken = fs.readFileSync(tokenFile, "utf8").trim();
+  } catch {
+    const legacyTokenFile = `${path.join(stateDir, "claudecode-runtime.sock")}.token`;
+    try {
+      authToken = fs.readFileSync(legacyTokenFile, "utf8").trim();
+    } catch {
+      console.error(`Failed to read IPC auth token: ${tokenFile}`);
+      console.error("Make sure the bridge is running with CYBERBOSS_RUNTIME=claudecode.");
+      process.exit(1);
+    }
+  }
+
+  const socket = net.createConnection(endpoint);
   socket.setEncoding("utf8");
 
   let connected = false;
@@ -76,19 +93,10 @@ async function main() {
     setTimeout(() => reject(new Error("connect timeout")), 3000);
   });
 
-  console.log(`Connected to ClaudeCode bridge IPC (${socketPath})`);
+  console.log(`Connected to ClaudeCode bridge IPC (${endpoint})`);
   console.log(`Observing workspace: ${workspaceRoot}`);
   console.log("Type your message and press Enter to send. Ctrl+C to exit.\n");
 
-  // Authenticate with the IPC server
-  const tokenFile = `${socketPath}.token`;
-  let authToken = "";
-  try {
-    authToken = fs.readFileSync(tokenFile, "utf8").trim();
-  } catch {
-    console.error(`Failed to read IPC auth token: ${tokenFile}`);
-    process.exit(1);
-  }
   socket.write(JSON.stringify({ type: "auth", token: authToken }) + "\n");
 
   // Handle incoming events from the bridge
