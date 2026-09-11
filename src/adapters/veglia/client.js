@@ -103,8 +103,21 @@ class VegliaActivitySource {
 
       const mostRecent = formattedEvents.length > 0 ? formattedEvents[formattedEvents.length - 1] : null;
 
+      let current = null;
+      if (data.current && typeof data.current === "object") {
+        const curApp = String(data.current.app || "").trim();
+        const curTs = Number.parseInt(String(data.current.lastHeartbeatTs || ""), 10) || 0;
+        current = {
+          app: curApp,
+          label: this.getAppLabel(curApp),
+          screenInteractive: Boolean(data.current.screenInteractive),
+          lastHeartbeatTs: curTs,
+        };
+      }
+
       return {
         ok: true,
+        current,
         events: formattedEvents,
         mostRecent,
       };
@@ -112,6 +125,7 @@ class VegliaActivitySource {
       return {
         ok: false,
         error: error instanceof Error ? error.message : String(error || "unknown error"),
+        current: null,
         events: [],
         mostRecent: null,
       };
@@ -130,15 +144,12 @@ function resolveVegliaToken(options = {}) {
     return explicit.trim();
   }
 
-  const candidates = [
-    path.join("d:", "veglia", "server", ".env"),
-    path.resolve(process.cwd(), "..", "veglia", "server", ".env"),
-  ];
-
-  for (const envPath of candidates) {
+  const envFile = options.envFile || options.vegliaEnvFile || process.env.CYBERBOSS_VEGLIA_ENV_FILE;
+  if (envFile && typeof envFile === "string" && envFile.trim()) {
     try {
-      if (fs.existsSync(envPath)) {
-        const content = fs.readFileSync(envPath, "utf8");
+      const resolved = path.resolve(envFile.trim());
+      if (fs.existsSync(resolved)) {
+        const content = fs.readFileSync(resolved, "utf8");
         for (const line of content.split("\n")) {
           const trimmed = line.trim();
           if (trimmed.startsWith("VEGLIA_TOKEN=") && !trimmed.startsWith("#")) {

@@ -3,13 +3,14 @@ const { resolveSelectedAccount } = require("../adapters/channel/weixin/account-s
 const { SessionStore } = require("../adapters/runtime/codex/session-store");
 const { resolvePreferredSenderId, resolvePreferredWorkspaceRoot } = require("../core/default-targets");
 const { SystemMessageQueueStore } = require("../core/system-message-queue-store");
-const { VegliaActivitySource } = require("../adapters/veglia/client");
+const { VegliaActivitySource, DEFAULT_APP_LABELS } = require("../adapters/veglia/client");
 const { PhoneWatchStateStore } = require("../core/phone-watch-state-store");
 
 const DEFAULT_INTERVAL_MS = 5 * 60_000;
 const DEFAULT_TRIGGER_AFTER_MS = 10 * 60_000;
 const DEFAULT_COOLDOWN_MS = 15 * 60_000;
 const DEFAULT_INACTIVE_RESET_MS = 10 * 60_000;
+const DEFAULT_HEARTBEAT_STALE_MS = 180_000;
 
 class PhoneActivityWatcher {
   constructor(options = {}) {
@@ -26,6 +27,9 @@ class PhoneActivityWatcher {
     this.inactiveResetMs = Number.isFinite(options.inactiveResetMs) && options.inactiveResetMs > 0
       ? options.inactiveResetMs
       : (this.config.phoneWatchInactiveResetMs || DEFAULT_INACTIVE_RESET_MS);
+    this.heartbeatStaleMs = Number.isFinite(options.heartbeatStaleMs) && options.heartbeatStaleMs > 0
+      ? options.heartbeatStaleMs
+      : (this.config.phoneWatchHeartbeatStaleMs || DEFAULT_HEARTBEAT_STALE_MS);
 
     this.clock = typeof options.clock === "function" ? options.clock : () => Date.now();
     this.activitySource = options.activitySource || new VegliaActivitySource(this.config);
@@ -61,10 +65,134 @@ class PhoneActivityWatcher {
       return { triggered: false, reason: "offline" };
     }
 
+    // 3. Check if new heartbeat schema is available in sampleData
+    const hasCurrent = Boolean(sampleData.current && typeof sampleData.current === "object");
+
+    if (hasCurrent) {
+      const current = sampleData.current;
+
+      // Priority 1: screenInteractive === false -> inactive/reset
+      if (current.screenInteractive === false) {
+        if (nextState.sessionStartedAt) {
+          nextState.sessionStartedAt = null;
+          nextState.continuousActiveMs = 0;
+          nextState.lastResetAt = isoNow;
+        }
+        this.stateStore.update(nextState);
+        return { triggered: false, reason: "screen_off" };
+      }
+
+      // Priority 2 & 3: screenInteractive === true, check heartbeat freshness
+      const lastHb = Number(current.lastHeartbeatTs) || 0;
+      const heartbeatAge = Math.max(0, nowMs - lastHb);
+
+      if (!lastHb || heartbeatAge > this.heartbeatStaleMs) {
+        // Priority 3: Heartbeat stale -> reset session, avoid false accumulation
+        if (nextState.sessionStartedAt) {
+          nextState.sessionStartedAt = null;
+          nextState.continuousActiveMs = 0;
+          nextState.lastResetAt = isoNow;
+        }
+        this.stateStore.update(nextState);
+        return { triggered: false, reason: "heartbeat_stale" };
+      }
+
+      // Priority 2: screenInteractive === true and heartbeat is fresh
+      const appPkg = String(current.app || "").trim();
+      const appLabel = current.label || (this.activitySource?.getAppLabel ? this.activitySource.getAppLabel(appPkg) : DEFAULT_APP_LABELS[appPkg]) || appPkg || "unknown";
+      nextState.currentApp = appLabel;
+      nextState.lastActiveAt = isoNow;
+
+      // Determine session start
+      const events = Array.isArray(sampleData.events) ? sampleData.events : [];
+      if (!nextState.sessionStartedAt) {
+        let effectiveStartMs = nowMs;
+        const matchingSwitch = events.length > 0 && events[events.length - 1]?.app === appPkg ? events[events.length - 1].ts : 0;
+        if (matchingSwitch && matchingSwitch <= nowMs && (nowMs - matchingSwitch) <= this.inactiveResetMs) {
+          effectiveStartMs = matchingSwitch;
+        } else if (lastHb && lastHb <= nowMs && (nowMs - lastHb) <= this.heartbeatStaleMs) {
+          effectiveStartMs = lastHb;
+        }
+        nextState.sessionStartedAt = new Date(effectiveStartMs).toISOString();
+        nextState.continuousActiveMs = Math.max(0, nowMs - effectiveStartMs);
+      } else {
+        const sessionStartMs = Date.parse(nextState.sessionStartedAt);
+        nextState.continuousActiveMs = Math.max(0, nowMs - sessionStartMs);
+      }
+
+      // Collect recent apps
+      const sessionStartMs = Date.parse(nextState.sessionStartedAt);
+      const effectiveSinceMs = Number.isFinite(sessionStartMs) ? sessionStartMs : (nowMs - this.inactiveResetMs);
+
+      const recent = [];
+      const seen = new Set();
+      if (appLabel && appLabel !== "unknown") {
+        recent.push(appLabel);
+        seen.add(appLabel);
+      }
+      for (let i = events.length - 1; i >= 0; i -= 1) {
+        const ev = events[i];
+        if (ev && ev.ts && ev.ts >= effectiveSinceMs - 60_000) {
+          const l = ev.label || (this.activitySource?.getAppLabel ? this.activitySource.getAppLabel(ev.app) : ev.app);
+          if (l && !seen.has(l)) {
+            seen.add(l);
+            recent.push(l);
+          }
+        }
+      }
+      nextState.recentApps = recent.slice(0, 5);
+
+      // Check Trigger Conditions
+      const meetsActiveThreshold = nextState.continuousActiveMs >= this.triggerAfterMs;
+      const lastTriggerMs = nextState.lastTriggerAt ? Date.parse(nextState.lastTriggerAt) : null;
+      const cooldownElapsed = !Number.isFinite(lastTriggerMs) || (nowMs - lastTriggerMs) >= this.triggerCooldownMs;
+
+      if (meetsActiveThreshold && cooldownElapsed) {
+        const triggerText = buildPhoneWatchTriggerText({
+          continuousActiveMs: nextState.continuousActiveMs,
+          currentApp: nextState.currentApp,
+          recentApps: nextState.recentApps,
+          lastTriggerAt: nextState.lastTriggerAt,
+          nowMs,
+        });
+
+        if (this.queueStore && this.target) {
+          this.queueStore.enqueue({
+            id: crypto.randomUUID(),
+            accountId: this.target.accountId,
+            senderId: this.target.senderId,
+            workspaceRoot: this.target.workspaceRoot,
+            text: triggerText,
+            createdAt: isoNow,
+            source: "phone_watch",
+          });
+        }
+
+        nextState.lastTriggerAt = isoNow;
+        nextState.lastTriggerContinuousMs = nextState.continuousActiveMs;
+        this.stateStore.update(nextState);
+
+        return {
+          triggered: true,
+          continuousActiveMs: nextState.continuousActiveMs,
+          currentApp: nextState.currentApp,
+          recentApps: nextState.recentApps,
+          triggerText,
+        };
+      }
+
+      this.stateStore.update(nextState);
+      return {
+        triggered: false,
+        reason: !meetsActiveThreshold ? "below_threshold" : "in_cooldown",
+        continuousActiveMs: nextState.continuousActiveMs,
+      };
+    }
+
+    // Priority 4: Legacy fallback (events only)
     const events = Array.isArray(sampleData.events) ? sampleData.events : [];
     const mostRecent = sampleData.mostRecent || (events.length > 0 ? events[events.length - 1] : null);
 
-    // 3. Handle no events at all
     if (!mostRecent || !mostRecent.ts) {
       if (nextState.lastActiveAt) {
         const lastActiveMs = Date.parse(nextState.lastActiveAt);
@@ -75,35 +203,33 @@ class PhoneActivityWatcher {
         }
       }
       this.stateStore.update(nextState);
-      return { triggered: false, reason: "no_events" };
+      return { triggered: false, reason: "no_events", legacy: true };
     }
 
-    // 4. Check time since most recent event
     const timeSinceLastEvent = Math.max(0, nowMs - mostRecent.ts);
     if (timeSinceLastEvent > this.inactiveResetMs) {
-      // Inactive timeout: phone was not used within the inactive threshold
       if (nextState.sessionStartedAt) {
         nextState.sessionStartedAt = null;
         nextState.continuousActiveMs = 0;
         nextState.lastResetAt = isoNow;
       }
       this.stateStore.update(nextState);
-      return { triggered: false, reason: "inactive_timeout" };
+      return { triggered: false, reason: "inactive_timeout", legacy: true };
     }
 
-    // 5. Phone is currently active
     const label = mostRecent.label || mostRecent.app || "unknown";
     nextState.currentApp = label;
     nextState.lastActiveAt = isoNow;
 
-    // Maintain recent apps from events
     const sessionStartMs = nextState.sessionStartedAt ? Date.parse(nextState.sessionStartedAt) : null;
     const effectiveStartMs = Number.isFinite(sessionStartMs) ? sessionStartMs : Math.max(mostRecent.ts, nowMs - this.inactiveResetMs);
 
-    // Collect apps since effective start
     const recent = [];
     const seen = new Set();
-    // iterate events newest to oldest
+    if (label && label !== "unknown") {
+      recent.push(label);
+      seen.add(label);
+    }
     for (let i = events.length - 1; i >= 0; i -= 1) {
       const ev = events[i];
       if (ev && ev.ts && ev.ts >= effectiveStartMs - 60_000) {
@@ -114,12 +240,8 @@ class PhoneActivityWatcher {
         }
       }
     }
-    if (!seen.has(label)) {
-      recent.unshift(label);
-    }
     nextState.recentApps = recent.slice(0, 5);
 
-    // Session accumulation
     if (!nextState.sessionStartedAt) {
       nextState.sessionStartedAt = new Date(effectiveStartMs).toISOString();
       nextState.continuousActiveMs = Math.max(0, nowMs - effectiveStartMs);
@@ -127,13 +249,11 @@ class PhoneActivityWatcher {
       nextState.continuousActiveMs = Math.max(0, nowMs - Date.parse(nextState.sessionStartedAt));
     }
 
-    // 6. Check Trigger Conditions
     const meetsActiveThreshold = nextState.continuousActiveMs >= this.triggerAfterMs;
     const lastTriggerMs = nextState.lastTriggerAt ? Date.parse(nextState.lastTriggerAt) : null;
     const cooldownElapsed = !Number.isFinite(lastTriggerMs) || (nowMs - lastTriggerMs) >= this.triggerCooldownMs;
 
     if (meetsActiveThreshold && cooldownElapsed) {
-      // Trigger condition met!
       const triggerText = buildPhoneWatchTriggerText({
         continuousActiveMs: nextState.continuousActiveMs,
         currentApp: nextState.currentApp,
@@ -164,6 +284,7 @@ class PhoneActivityWatcher {
         currentApp: nextState.currentApp,
         recentApps: nextState.recentApps,
         triggerText,
+        legacy: true,
       };
     }
 
@@ -172,6 +293,7 @@ class PhoneActivityWatcher {
       triggered: false,
       reason: !meetsActiveThreshold ? "below_threshold" : "in_cooldown",
       continuousActiveMs: nextState.continuousActiveMs,
+      legacy: true,
     };
   }
 
@@ -293,4 +415,5 @@ module.exports = {
   DEFAULT_TRIGGER_AFTER_MS,
   DEFAULT_COOLDOWN_MS,
   DEFAULT_INACTIVE_RESET_MS,
+  DEFAULT_HEARTBEAT_STALE_MS,
 };

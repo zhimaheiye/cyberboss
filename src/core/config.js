@@ -110,8 +110,10 @@ function readConfig() {
     phoneWatchTriggerAfterMs: readIntEnv("CYBERBOSS_PHONE_WATCH_TRIGGER_AFTER_MS") || 600_000,
     phoneWatchTriggerCooldownMs: readIntEnv("CYBERBOSS_PHONE_WATCH_TRIGGER_COOLDOWN_MS") || 900_000,
     phoneWatchInactiveResetMs: readIntEnv("CYBERBOSS_PHONE_WATCH_INACTIVE_RESET_MS") || 600_000,
+    phoneWatchHeartbeatStaleMs: readIntEnv("CYBERBOSS_PHONE_WATCH_HEARTBEAT_STALE_MS") || 180_000,
     vegliaUrl: readTextEnv("CYBERBOSS_VEGLIA_URL") || "http://127.0.0.1:8513",
     vegliaToken: readTextEnv("CYBERBOSS_VEGLIA_TOKEN"),
+    vegliaEnvFile: readTextEnv("CYBERBOSS_VEGLIA_ENV_FILE"),
   };
 }
 
