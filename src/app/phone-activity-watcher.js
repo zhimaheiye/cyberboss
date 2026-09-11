@@ -375,9 +375,15 @@ function buildPhoneWatchTriggerText({
     `Recent apps: ${recentAppsText}`,
     `Last phone-watch trigger: ${lastTriggerText}`,
     "",
-    "This is a background awareness event, not an instruction to message the user.",
-    "Use the current time, existing context, and available tools if useful.",
-    "Decide naturally whether to stay silent or send a message.",
+    "This phone-watch event was triggered because sustained phone use has already crossed the configured supervision threshold.",
+    "",
+    "Supervision guidance:",
+    "- If current/recent phone apps are clearly entertainment, social-media, short-video, game, or other likely distraction apps, entertainment/social/game sustained use should generally favor a brief reminder. Concurrent PC activity alone should NOT be treated as a reason to stay silent; PC activity is contextual evidence, not a veto.",
+    "- If PC is also active, use that to understand user context and adapt your reminder to be lower-pressure and more natural, but do not treat concurrent PC activity as an automatic reason to stay silent.",
+    "- If the phone use appears functional or task-related (for example messaging, payment, settings, navigation, authentication, or clearly purposeful utility), functional/task-related phone use may remain silent.",
+    "- Extra MCP queries (such as checking PC or phone activity) are to supplement context and refine tone, not to seek an automatic excuse for staying silent.",
+    "- Do not sound like a parental-control app, do not lecture, and do not repeatedly nag. Maintain your natural personality.",
+    "- You still retain final discretion. Decide naturally whether to stay silent or send a message based on the whole picture.",
   ].join("\n");
 }
 

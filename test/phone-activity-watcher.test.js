@@ -1040,3 +1040,74 @@ test("23. VegliaActivitySource: parses current field and resolves token without 
   assert.equal(res.current.screenInteractive, true);
   assert.equal(res.current.lastHeartbeatTs, 1_700_000_123_456);
 });
+
+test("24. Supervision guidance: trigger text contains required supervision principles", () => {
+  const triggerText = buildPhoneWatchTriggerText({
+    continuousActiveMs: 12 * 60_000,
+    currentApp: "小红书",
+    recentApps: ["小红书"],
+    lastTriggerAt: null,
+    nowMs: 1_700_000_000_000,
+  });
+
+  // 1. PC activity is contextual evidence, not a veto
+  assert.match(triggerText, /PC activity is contextual evidence, not a veto/);
+
+  // 2. entertainment/social/game sustained use should generally favor a brief reminder
+  assert.match(triggerText, /entertainment\/social\/game sustained use should generally favor a brief reminder/);
+
+  // 3. functional/task-related phone use may remain silent
+  assert.match(triggerText, /functional\/task-related phone use may remain silent/);
+
+  // 4. AGY retains final discretion without forced send_message
+  assert.match(triggerText, /Decide naturally whether to stay silent or send a message/);
+  assert.doesNotMatch(triggerText, /MUST send_message/i);
+  assert.doesNotMatch(triggerText, /FORBIDDEN to stay silent/i);
+
+  // 5. Preserves factual information
+  assert.match(triggerText, /Continuous active duration: about 12 minutes\./);
+  assert.match(triggerText, /Current foreground app: 小红书/);
+  assert.match(triggerText, /Recent apps: 小红书/);
+  assert.match(triggerText, /Last phone-watch trigger: None \(first trigger in this session\)/);
+});
+
+test("25. Supervision guidance: watcher enqueue does not force send_message and preserves AGY autonomy", async () => {
+  let currentTime = 1_700_000_000_000;
+  const clock = () => currentTime;
+  const mockSource = createMockActivitySource();
+  const queueStore = createMockQueueStore();
+  const stateStore = new PhoneWatchStateStore({ filePath: "" });
+
+  const watcher = new PhoneActivityWatcher({
+    clock,
+    activitySource: mockSource,
+    stateStore,
+    queueStore,
+    target: { accountId: "acc-1", senderId: "user-1", workspaceRoot: "d:\\cyberboss" },
+    triggerAfterMs: 10 * 60_000,
+    triggerCooldownMs: 15 * 60_000,
+  });
+
+  mockSource.setResponse({
+    ok: true,
+    current: { app: "com.xingin.xhs", label: "小红书", screenInteractive: true, lastHeartbeatTs: currentTime },
+  });
+  await watcher.sample();
+
+  currentTime += 12 * 60_000;
+  mockSource.setResponse({
+    ok: true,
+    current: { app: "com.xingin.xhs", label: "小红书", screenInteractive: true, lastHeartbeatTs: currentTime },
+  });
+  const res = await watcher.sample();
+
+  assert.equal(res.triggered, true);
+  assert.equal(queueStore.messages.length, 1);
+
+  const msg = queueStore.messages[0];
+  assert.match(msg.text, /PC activity is contextual evidence, not a veto/);
+  assert.match(msg.text, /entertainment\/social\/game sustained use should generally favor a brief reminder/);
+  assert.match(msg.text, /functional\/task-related phone use may remain silent/);
+  assert.match(msg.text, /Decide naturally whether to stay silent or send a message/);
+});
+
