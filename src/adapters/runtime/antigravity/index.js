@@ -42,6 +42,8 @@ function createAntigravityRuntimeAdapter(config = {}) {
     typeof config.antigravityTimeoutMs === "number" && config.antigravityTimeoutMs > 0
       ? config.antigravityTimeoutMs
       : 120_000;
+  const configuredMcpConfigPath = config.antigravityMcpConfigPath || "";
+  const configuredAgyConfigDir = config.antigravityConfigDir || "";
 
   function emitRuntimeEvent(event, raw) {
     for (const listener of listeners) {
@@ -82,6 +84,8 @@ function createAntigravityRuntimeAdapter(config = {}) {
       const projectSettings = ensureAntigravityGlobalMcpConfig({
         workspaceRoot: normalizedWorkspace,
         cyberbossHome: process.env.CYBERBOSS_HOME || path.resolve(__dirname, "..", "..", "..", ".."),
+        configPath: configuredMcpConfigPath,
+        agyConfigDir: configuredAgyConfigDir,
       });
       console.log(`[antigravity-runtime] workspace=${normalizedWorkspace} mcp_config=${projectSettings.configPath} server=${projectSettings.serverName}`);
     } catch (mcpErr) {

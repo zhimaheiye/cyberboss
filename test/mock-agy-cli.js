@@ -7,8 +7,9 @@ async function main() {
   const cwd = process.cwd();
   
   // 1. Verify that mcp_config.json was populated by the adapter
-  const agyAppData = path.join(os.homedir(), ".gemini", "config");
-  const configPath = path.join(agyAppData, "mcp_config.json");
+  const configPath =
+    process.env.CYBERBOSS_ANTIGRAVITY_MCP_CONFIG_PATH ||
+    path.join(os.homedir(), ".gemini", "config", "mcp_config.json");
   
   if (!fs.existsSync(configPath)) {
     console.error("mock-agy-cli: mcp_config.json not found");
@@ -28,7 +29,8 @@ async function main() {
   }
   
   const serverConfig = config.mcpServers[serverName];
-  if (!serverConfig.args.includes("tool-mcp-server") || !serverConfig.args.includes(cwd)) {
+  const hasCwd = serverConfig.args.some((arg) => typeof arg === "string" && arg.toLowerCase() === cwd.toLowerCase());
+  if (!serverConfig.args.includes("tool-mcp-server") || !hasCwd) {
     console.error(`mock-agy-cli: server config arguments are incorrect: ${JSON.stringify(serverConfig.args)}`);
     process.exit(1);
   }

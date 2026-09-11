@@ -82,6 +82,7 @@ async function runTests() {
 
   const tmpBase = path.join(os.tmpdir(), `cyberboss-retry-test-${Date.now()}`);
   fs.mkdirSync(tmpBase, { recursive: true });
+  process.env.CYBERBOSS_ANTIGRAVITY_MCP_CONFIG_PATH = path.join(tmpBase, "mcp_config.json");
 
   try {
     await testCase("Scenario 1: Attempt 1 stream interrupted -> Attempt 2 succeeds with conversation ID", async () => {

@@ -1,5 +1,6 @@
 const cp = require("child_process");
 const path = require("path");
+const os = require("os");
 const originalSpawn = cp.spawn;
 
 cp.spawn = function(command, args, options) {
@@ -15,10 +16,13 @@ async function runTest() {
   console.log("Starting zero-quota Antigravity MCP integration test...");
   const workspaceRoot = process.cwd();
   const sessionsFile = path.join(workspaceRoot, "sessions-test.json");
+  const tempMcpConfig = path.join(os.tmpdir(), `cyberboss-mcp-test-${Date.now()}.json`);
+  process.env.CYBERBOSS_ANTIGRAVITY_MCP_CONFIG_PATH = tempMcpConfig;
 
   const adapter = createAntigravityRuntimeAdapter({
     sessionsFile,
     antigravityCommand: "mock-agy",
+    antigravityMcpConfigPath: tempMcpConfig,
   });
 
   let failed = false;

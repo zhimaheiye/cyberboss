@@ -186,6 +186,7 @@ async function testRuntimeAdapterGuard(fake) {
     antigravityExtraArgs: [],
     weixinInstructionsFile: "",
     weixinOperationsFile: "",
+    antigravityMcpConfigPath: path.join(tempDir, "mcp_config.json"),
   };
 
   const adapter = createAntigravityRuntimeAdapter(config);
