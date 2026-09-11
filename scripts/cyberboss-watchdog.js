@@ -1,4 +1,5 @@
 const { spawn } = require("child_process");
+const fs = require("fs");
 const path = require("path");
 const readline = require("readline");
 const { IncidentRecorder } = require("../src/core/ops/incident-recorder");
@@ -35,10 +36,23 @@ class CyberbossWatchdog {
     this.child = null;
     this.intentionalShutdown = false;
     this.running = false;
-    this._resolveStopped = null;
-    this._stopPromise = null;
+    this._restartTimer = null;
+    this._restartResolve = null;
+    this._handlersInstalled = false;
     this._onSigInt = null;
     this._onSigTerm = null;
+
+    this._stopPromise = new Promise((resolve) => {
+      this._resolveStopped = resolve;
+    });
+  }
+
+  _resolveOnce(val) {
+    if (this._resolveStopped) {
+      const fn = this._resolveStopped;
+      this._resolveStopped = null;
+      fn(val);
+    }
   }
 
   appendLog(line) {
@@ -59,13 +73,8 @@ class CyberbossWatchdog {
   }
 
   async start() {
-    if (this.running) return this._stopPromise;
+    if (this.running || this.intentionalShutdown) return this._stopPromise;
     this.running = true;
-    this.intentionalShutdown = false;
-
-    this._stopPromise = new Promise((resolve) => {
-      this._resolveStopped = resolve;
-    });
 
     this._setupSignalHandlers();
     this._runLoop();
@@ -74,22 +83,50 @@ class CyberbossWatchdog {
   }
 
   async stop(signal = "SIGTERM") {
-    if (!this.running && !this.child) return;
+    if (this.intentionalShutdown) {
+      return this._stopPromise;
+    }
     this.intentionalShutdown = true;
     this.running = false;
+
+    if (this._restartTimer) {
+      clearTimeout(this._restartTimer);
+      this._restartTimer = null;
+      if (this._restartResolve) {
+        this._restartResolve();
+        this._restartResolve = null;
+      }
+    }
+
     if (this.child && !this.child.killed) {
       try {
         this.child.kill(signal);
       } catch {
         // ignore
       }
+      const childProc = this.child;
+      setTimeout(() => {
+        if (childProc && !childProc.killed) {
+          try {
+            childProc.kill("SIGKILL");
+          } catch {
+            // ignore
+          }
+        }
+      }, 10_000).unref();
+    } else if (!this.child) {
+      this._removeSignalHandlers();
+      this._cleanupBridgeProcess();
+      this._resolveOnce({ intentional: true, code: 0, signal: null });
     }
-    if (this._resolveStopped) {
-      this._resolveStopped({ intentional: true, code: 0 });
-    }
+
+    return this._stopPromise;
   }
 
   _setupSignalHandlers() {
+    if (this._handlersInstalled) return;
+    this._handlersInstalled = true;
+
     this._onSigInt = () => {
       console.log("\n[cyberboss-watchdog] received SIGINT, stopping cleanly...");
       this.stop("SIGINT");
@@ -104,13 +141,62 @@ class CyberbossWatchdog {
   }
 
   _removeSignalHandlers() {
-    if (this._onSigInt) process.removeListener("SIGINT", this._onSigInt);
-    if (this._onSigTerm) process.removeListener("SIGTERM", this._onSigTerm);
+    if (!this._handlersInstalled) return;
+    this._handlersInstalled = false;
+
+    if (this._onSigInt) {
+      process.removeListener("SIGINT", this._onSigInt);
+      this._onSigInt = null;
+    }
+    if (this._onSigTerm) {
+      process.removeListener("SIGTERM", this._onSigTerm);
+      this._onSigTerm = null;
+    }
+  }
+
+  _cleanupBridgeProcess() {
+    try {
+      const sharedCommonPath = path.join(__dirname, "shared-common");
+      const { bridgePidFile, readPidFile, isPidAlive } = require(sharedCommonPath);
+      const pid = readPidFile(bridgePidFile);
+      if (pid) {
+        if (isPidAlive(pid)) {
+          try {
+            process.kill(pid, "SIGTERM");
+          } catch {
+            // ignore
+          }
+          const start = Date.now();
+          while (Date.now() - start < 500 && isPidAlive(pid)) {
+            // wait up to 500ms
+          }
+          if (isPidAlive(pid)) {
+            try {
+              process.kill(pid, "SIGKILL");
+            } catch {
+              // ignore
+            }
+          }
+        }
+        if (!isPidAlive(pid)) {
+          try {
+            fs.rmSync(bridgePidFile, { force: true });
+          } catch {
+            // ignore
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
   }
 
   async _runLoop() {
+    let lastExit = { code: 0, signal: null };
+
     while (this.running && !this.intentionalShutdown) {
       const exitResult = await this._spawnChild();
+      lastExit = exitResult;
 
       if (this.intentionalShutdown) {
         break;
@@ -119,10 +205,10 @@ class CyberbossWatchdog {
       if (exitResult.code === 0) {
         console.log("[cyberboss-watchdog] child process exited cleanly with code 0.");
         this.running = false;
-        if (this._resolveStopped) {
-          this._resolveStopped(exitResult);
-        }
-        break;
+        this._removeSignalHandlers();
+        this._cleanupBridgeProcess();
+        this._resolveOnce(exitResult);
+        return;
       }
 
       // Unexpected crash
@@ -146,19 +232,32 @@ class CyberbossWatchdog {
         });
 
         this.running = false;
-        if (this._resolveStopped) {
-          this._resolveStopped({ ...exitResult, crashLoop: true });
-        }
-        break;
+        this._removeSignalHandlers();
+        this._cleanupBridgeProcess();
+        this._resolveOnce({ ...exitResult, crashLoop: true });
+        return;
       }
 
       console.log(
         `[cyberboss-watchdog] restarting child in ${this.restartDelayMs}ms... (${recentCrashCount}/${this.maxCrashes} crashes in window)`
       );
-      await new Promise((resolve) => setTimeout(resolve, this.restartDelayMs));
+      await new Promise((resolve) => {
+        this._restartResolve = resolve;
+        this._restartTimer = setTimeout(() => {
+          this._restartResolve = null;
+          this._restartTimer = null;
+          resolve();
+        }, this.restartDelayMs);
+      });
     }
 
     this._removeSignalHandlers();
+    this._cleanupBridgeProcess();
+    this._resolveOnce({
+      intentional: true,
+      code: lastExit.code ?? 0,
+      signal: lastExit.signal ?? null,
+    });
   }
 
   _spawnChild() {
