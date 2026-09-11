@@ -91,6 +91,14 @@ function readConfig() {
         ? "localhost,127.0.0.1,::1"
         : ""),
     sessionsFile: path.join(stateDir, "sessions.json"),
+    opsDir: path.join(stateDir, "ops"),
+    runtimeHealthFile: path.join(stateDir, "ops", "runtime-health.json"),
+    incidentsDir: path.join(stateDir, "ops", "incidents"),
+    antigravityStreamRetryMax: readIntEnv("CYBERBOSS_ANTIGRAVITY_STREAM_RETRY_MAX") ?? 1,
+    antigravityStreamRetryDelayMs: readIntEnv("CYBERBOSS_ANTIGRAVITY_STREAM_RETRY_DELAY_MS") ?? 2500,
+    runtimeFailureIncidentThreshold: readIntEnv("CYBERBOSS_RUNTIME_FAILURE_INCIDENT_THRESHOLD") ?? 3,
+    runtimeFailureWindowMs: readIntEnv("CYBERBOSS_RUNTIME_FAILURE_WINDOW_MS") ?? 900_000,
+    runtimeIncidentCooldownMs: readIntEnv("CYBERBOSS_RUNTIME_INCIDENT_COOLDOWN_MS") ?? 1_800_000,
     startWithCheckin: (mode === "start" && hasArgFlag(argv, "--checkin")) || readBoolEnv("CYBERBOSS_ENABLE_CHECKIN"),
   };
 }

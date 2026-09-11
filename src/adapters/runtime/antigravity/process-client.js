@@ -3,6 +3,9 @@ const {
   extractBlockedPersistentTool,
   isSuccessfulResultEvent,
   formatResultFailureReason,
+  extractResultError,
+  KNOWN_FAILURE_STATUSES,
+  normalizeStatus,
 } = require("./events");
 
 const FORBIDDEN_EXTRA_ARGS = new Set([
@@ -350,14 +353,22 @@ class AntigravityProcessClient {
           return safeReject(new Error(`antigravity process exited without emitting a result event${errDetail}`));
         }
 
-        if (!finalConversationId) {
-          return safeReject(new Error("antigravity process completed but did not provide a conversation ID"));
-        }
-
         const failureMessage = formatResultFailureReason(resultEvent, code);
         if (isAntigravityAuthError(failureMessage) || isAntigravityAuthError(stderrBuffer)) {
           return safeReject(new Error(AUTH_REQUIRED_MESSAGE));
         }
+
+        const hasExplicitError =
+          Boolean(extractResultError(resultEvent)) ||
+          KNOWN_FAILURE_STATUSES.has(normalizeStatus(resultEvent?.status));
+        if (hasExplicitError) {
+          return safeReject(new Error(failureMessage));
+        }
+
+        if (!finalConversationId) {
+          return safeReject(new Error("antigravity process completed but did not provide a conversation ID"));
+        }
+
         return safeReject(new Error(failureMessage));
       });
     });

@@ -7,6 +7,11 @@ const {
   formatResultFailureReason,
 } = require("./events");
 const { ensureAntigravityGlobalMcpConfig } = require("./mcp-settings");
+const {
+  classifyAntigravityFailure,
+  hasToolCallEvidence,
+} = require("../../../core/ops/error-classifier");
+const { IncidentRecorder } = require("../../../core/ops/incident-recorder");
 const path = require("path");
 
 function createAntigravityRuntimeAdapter(config = {}) {
@@ -15,8 +20,18 @@ function createAntigravityRuntimeAdapter(config = {}) {
     runtimeId: "antigravity",
   });
 
+  const opsDir = config.opsDir || (config.stateDir ? path.join(config.stateDir, "ops") : undefined);
+  const incidentRecorder =
+    config.incidentRecorder ||
+    new IncidentRecorder({
+      opsDir,
+      failureThreshold: config.runtimeFailureIncidentThreshold,
+      failureWindowMs: config.runtimeFailureWindowMs,
+      incidentCooldownMs: config.runtimeIncidentCooldownMs,
+    });
+
   const listeners = new Set();
-  const activeRuns = new Map(); // scopeKey -> { client, bindingKey, workspaceRoot, turnId, threadId }
+  const activeRuns = new Map(); // scopeKey -> { client, bindingKey, workspaceRoot, turnId, threadId, cancelled }
   let turnSequence = 0;
 
   const configuredCommand = config.antigravityCommand || "antigravity";
@@ -63,11 +78,6 @@ function createAntigravityRuntimeAdapter(config = {}) {
 
     const turnId = `agy-turn-${Date.now()}-${++turnSequence}`;
 
-    let outboundText = text;
-    if (!threadId && !isInstructionRefresh) {
-      outboundText = buildOpeningTurnText(config, text);
-    }
-
     try {
       const projectSettings = ensureAntigravityGlobalMcpConfig({
         workspaceRoot: normalizedWorkspace,
@@ -78,118 +88,204 @@ function createAntigravityRuntimeAdapter(config = {}) {
       console.error(`[antigravity-runtime] failed to configure MCP: ${mcpErr.message}`);
     }
 
-    const client = new AntigravityProcessClient({
-      command: configuredCommand,
-      cwd: normalizedWorkspace,
-      env: process.env,
-      extraArgs: configuredExtraArgs,
-      timeoutMs: configuredTimeoutMs,
-      httpProxy: config.antigravityHttpProxy,
-      httpsProxy: config.antigravityHttpsProxy,
-      noProxy: config.antigravityNoProxy,
-    });
+    const maxRetries =
+      typeof config.antigravityStreamRetryMax === "number" && config.antigravityStreamRetryMax >= 0
+        ? config.antigravityStreamRetryMax
+        : 1;
+    const maxAttempts = 1 + maxRetries;
+    const retryDelayMs =
+      typeof config.antigravityStreamRetryDelayMs === "number" && config.antigravityStreamRetryDelayMs >= 0
+        ? config.antigravityStreamRetryDelayMs
+        : 2500;
 
     let observedConversationId = threadId;
     let terminalRuntimeEventEmitted = false;
+    let currentClient = null;
+    let currentUnsubscribe = null;
+    const recentTurnEvents = [];
 
-    activeRuns.set(scopeKey, {
-      client,
+    const activeEntry = {
+      client: null,
       bindingKey,
       workspaceRoot: normalizedWorkspace,
       turnId,
-      threadId,
-    });
-
-    const unsubscribeRaw = client.onMessage((raw) => {
-      // Capture conversation ID from init or result
-      let candidateId = "";
-      if (raw.event === "init" && raw.conversation_id) {
-        candidateId = raw.conversation_id;
-      } else if (raw.event === "result" && raw.result?.conversation_id) {
-        candidateId = raw.result.conversation_id;
-      }
-
-      if (candidateId) {
-        observedConversationId = candidateId;
-        // IMPORTANT: Write to SessionStore BEFORE emitting runtime events so binding lookup succeeds
-        sessionStore.setThreadIdForWorkspace(bindingKey, normalizedWorkspace, candidateId, metadata);
-        const activeEntry = activeRuns.get(scopeKey);
-        if (activeEntry) {
-          activeEntry.threadId = candidateId;
-        }
-      }
-
-      // Map and emit runtime events
-      const mappedEvents = mapAntigravityMessageToRuntimeEvents(raw, {
-        turnId,
-        fallbackThreadId: observedConversationId || threadId,
-      });
-
-      for (const evt of mappedEvents) {
-        if (evt.type === "runtime.turn.completed" || evt.type === "runtime.turn.failed") {
-          terminalRuntimeEventEmitted = true;
-        }
-        emitRuntimeEvent(evt, raw);
-      }
-    });
+      threadId: observedConversationId || threadId,
+      cancelled: false,
+    };
+    activeRuns.set(scopeKey, activeEntry);
 
     try {
-      const turnResult = await client.runTurn({
-        text: outboundText,
-        conversationId: threadId,
-        model: effectiveModel,
-        effort: configuredEffort,
-      });
-
-      if (turnResult.conversationId) {
-        sessionStore.setThreadIdForWorkspace(bindingKey, normalizedWorkspace, turnResult.conversationId, metadata);
-      }
-
-      const finalThreadId = turnResult.conversationId || observedConversationId || threadId;
-      if (!isSuccessfulResultEvent(turnResult, finalThreadId)) {
-        const failureMessage = formatResultFailureReason(turnResult);
-        if (!terminalRuntimeEventEmitted) {
-          terminalRuntimeEventEmitted = true;
-          emitRuntimeEvent(
-            {
-              type: "runtime.turn.failed",
-              payload: {
-                threadId: finalThreadId,
-                turnId,
-                text: failureMessage,
-              },
-            },
-            null
-          );
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        if (activeEntry.cancelled) {
+          throw new Error("antigravity turn was cancelled");
         }
-        throw new Error(failureMessage);
-      }
 
-      return {
-        threadId: turnResult.conversationId || observedConversationId,
-        turnId,
-      };
-    } catch (err) {
-      const targetThreadId = observedConversationId || threadId;
-      if (targetThreadId && !terminalRuntimeEventEmitted) {
-        terminalRuntimeEventEmitted = true;
-        emitRuntimeEvent(
-          {
-            type: "runtime.turn.failed",
-            payload: {
-              threadId: targetThreadId,
+        if (attempt > 1) {
+          console.warn(
+            `[antigravity-runtime] stream interrupted without tool side effects; retrying turn (attempt ${attempt}/${maxAttempts}) in ${retryDelayMs}ms...`
+          );
+          await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+          if (activeEntry.cancelled) {
+            throw new Error("antigravity turn was cancelled");
+          }
+        }
+
+        const currentThreadId =
+          observedConversationId ||
+          sessionStore.getThreadIdForWorkspace(bindingKey, normalizedWorkspace) ||
+          threadId;
+
+        let outboundText = text;
+        if (!currentThreadId && !isInstructionRefresh) {
+          outboundText = buildOpeningTurnText(config, text);
+        }
+
+        currentClient = new AntigravityProcessClient({
+          command: configuredCommand,
+          cwd: normalizedWorkspace,
+          env: process.env,
+          extraArgs: configuredExtraArgs,
+          timeoutMs: configuredTimeoutMs,
+          httpProxy: config.antigravityHttpProxy,
+          httpsProxy: config.antigravityHttpsProxy,
+          noProxy: config.antigravityNoProxy,
+        });
+        activeEntry.client = currentClient;
+
+        let hasToolCallsInAttempt = false;
+
+        currentUnsubscribe = currentClient.onMessage((raw) => {
+          recentTurnEvents.push(raw);
+          if (recentTurnEvents.length > 50) {
+            recentTurnEvents.shift();
+          }
+
+          if (hasToolCallEvidence(raw)) {
+            hasToolCallsInAttempt = true;
+          }
+
+          let candidateId = "";
+          if (raw.event === "init" && raw.conversation_id) {
+            candidateId = raw.conversation_id;
+          } else if (raw.event === "result" && raw.result?.conversation_id) {
+            candidateId = raw.result.conversation_id;
+          }
+
+          if (candidateId) {
+            observedConversationId = candidateId;
+            sessionStore.setThreadIdForWorkspace(bindingKey, normalizedWorkspace, candidateId, metadata);
+            activeEntry.threadId = candidateId;
+          }
+
+          const mappedEvents = mapAntigravityMessageToRuntimeEvents(raw, {
+            turnId,
+            fallbackThreadId: observedConversationId || threadId,
+          });
+
+          for (const evt of mappedEvents) {
+            if (evt.type === "runtime.turn.completed") {
+              terminalRuntimeEventEmitted = true;
+              emitRuntimeEvent(evt, raw);
+            } else if (evt.type === "runtime.turn.failed") {
+              // Defer failure terminal events to catch handler so retryable errors are transparent
+              continue;
+            } else {
+              emitRuntimeEvent(evt, raw);
+            }
+          }
+        });
+
+        try {
+          const turnResult = await currentClient.runTurn({
+            text: outboundText,
+            conversationId: currentThreadId,
+            model: effectiveModel,
+            effort: configuredEffort,
+          });
+
+          if (turnResult.conversationId) {
+            sessionStore.setThreadIdForWorkspace(bindingKey, normalizedWorkspace, turnResult.conversationId, metadata);
+          }
+
+          const finalThreadId = turnResult.conversationId || observedConversationId || currentThreadId;
+          if (!isSuccessfulResultEvent(turnResult, finalThreadId)) {
+            const failureMessage = formatResultFailureReason(turnResult);
+            throw new Error(failureMessage);
+          }
+
+          incidentRecorder.recordSuccess("antigravity", normalizedWorkspace);
+
+          return {
+            threadId: turnResult.conversationId || observedConversationId,
+            turnId,
+          };
+        } catch (attemptErr) {
+          if (currentUnsubscribe) {
+            currentUnsubscribe();
+            currentUnsubscribe = null;
+          }
+          if (currentClient) {
+            await currentClient.close().catch(() => {});
+            currentClient = null;
+            activeEntry.client = null;
+          }
+
+          if (activeEntry.cancelled) {
+            throw attemptErr;
+          }
+
+          const classified = classifyAntigravityFailure(attemptErr);
+          const canRetry = attempt < maxAttempts && classified.retryable && !hasToolCallsInAttempt;
+
+          if (canRetry) {
+            continue;
+          }
+
+          const targetThreadId = observedConversationId || currentThreadId;
+          if (targetThreadId && !terminalRuntimeEventEmitted) {
+            terminalRuntimeEventEmitted = true;
+            emitRuntimeEvent(
+              {
+                type: "runtime.turn.failed",
+                payload: {
+                  threadId: targetThreadId,
+                  turnId,
+                  text: attemptErr instanceof Error ? attemptErr.message : String(attemptErr),
+                },
+              },
+              null
+            );
+          }
+
+          incidentRecorder.recordFailure({
+            runtime: "antigravity",
+            workspaceRoot: normalizedWorkspace,
+            error: attemptErr,
+            turnContext: {
               turnId,
-              text: err instanceof Error ? err.message : String(err),
+              threadId: targetThreadId,
+              attempt,
+              maxAttempts,
+              model: effectiveModel,
+              isInstructionRefresh,
+              classification: classified.reason,
+              toolActivity: hasToolCallsInAttempt,
+              autoRetried: attempt > 1,
             },
-          },
-          null
-        );
+            recentEvents: recentTurnEvents,
+          });
+
+          throw attemptErr;
+        }
       }
-      throw err;
     } finally {
-      unsubscribeRaw();
+      if (currentUnsubscribe) {
+        currentUnsubscribe();
+      }
       activeRuns.delete(scopeKey);
-      await client.close().catch(() => {});
+      if (currentClient) {
+        await currentClient.close().catch(() => {});
+      }
     }
   }
 
@@ -220,6 +316,9 @@ function createAntigravityRuntimeAdapter(config = {}) {
         toolImageRead: true,
       };
     },
+    getIncidentRecorder() {
+      return incidentRecorder;
+    },
     async initialize() {
       return {
         command: configuredCommand,
@@ -228,7 +327,7 @@ function createAntigravityRuntimeAdapter(config = {}) {
     },
     async close() {
       const runs = Array.from(activeRuns.values());
-      await Promise.allSettled(runs.map((r) => r.client.close()));
+      await Promise.allSettled(runs.map((r) => (r.client ? r.client.close() : Promise.resolve())));
       activeRuns.clear();
       listeners.clear();
     },
@@ -259,7 +358,10 @@ function createAntigravityRuntimeAdapter(config = {}) {
         }
       }
       if (target) {
-        await target.client.cancel().catch(() => {});
+        target.cancelled = true;
+        if (target.client) {
+          await target.client.cancel().catch(() => {});
+        }
       }
       return { threadId, turnId };
     },
