@@ -42,6 +42,7 @@ const {
   splitCommandLine,
 } = require("../adapters/runtime/shared/approval-command");
 const { runSystemCheckinPoller } = require("../app/system-checkin-poller");
+const { runPhoneActivityWatcher } = require("../app/phone-activity-watcher");
 const { createProjectTooling } = require("../tools/create-project-tooling");
 const DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000;
 const MIN_LONG_POLL_TIMEOUT_MS = 2_000;
@@ -170,6 +171,12 @@ class CyberbossApp {
       console.log("[cyberboss] checkin: enabled");
       void runSystemCheckinPoller(this.config).catch((error) => {
         console.error(`[cyberboss] checkin poller stopped: ${error.message}`);
+      });
+    }
+    if (this.config.phoneWatchEnabled) {
+      console.log("[cyberboss] phone-watch: enabled");
+      void runPhoneActivityWatcher(this.config).catch((error) => {
+        console.error(`[phone-watch] watcher stopped: ${error.message}`);
       });
     }
 
@@ -529,7 +536,8 @@ class CyberbossApp {
     } catch (error) {
       this.turnGateStore.releaseScope(bindingKey, workspaceRoot);
       const messageText = error instanceof Error ? error.message : String(error || "unknown error");
-      if (prepared?.source !== "checkin") {
+      const isSilentSource = prepared?.source === "checkin" || prepared?.source === "phone_watch";
+      if (!isSilentSource) {
         if (!terminalFailureEmitted && !terminalCompletedEmitted) {
           await this.channelAdapter.sendText({
             userId: prepared.senderId,
@@ -538,8 +546,9 @@ class CyberbossApp {
           }).catch(() => {});
         }
       } else {
+        const failureLabel = prepared?.source === "phone_watch" ? "phone_watch" : "checkin";
         const checkinError = formatCheckinErrorMessage(error);
-        console.warn(`[cyberboss] checkin runtime failed: ${checkinError}`);
+        console.warn(`[cyberboss] ${failureLabel} runtime failed: ${checkinError}`);
       }
       return false;
     } finally {
@@ -904,9 +913,10 @@ class CyberbossApp {
           this.systemMessageDispatcher.requeue(message);
         }
       } catch (error) {
-        if (message?.source === "checkin") {
+        if (message?.source === "checkin" || message?.source === "phone_watch") {
+          const failureLabel = message?.source === "phone_watch" ? "phone_watch" : "checkin";
           const checkinError = formatCheckinErrorMessage(error);
-          console.warn(`[cyberboss] checkin runtime failed: ${checkinError}`);
+          console.warn(`[cyberboss] ${failureLabel} runtime failed: ${checkinError}`);
         }
         this.systemMessageDispatcher?.requeue(message);
       }
@@ -1584,16 +1594,22 @@ class CyberbossApp {
           if (!activeDispatch && this.activeDispatchByScopeKey?.size === 1) {
             activeDispatch = this.activeDispatchByScopeKey.values().next().value;
           }
-          const isCheckin = activeDispatch?.prepared?.source === "checkin" || failureReplyTarget?.source === "checkin";
-          if (!isCheckin) {
+          const isSilentSource = activeDispatch?.prepared?.source === "checkin"
+            || activeDispatch?.prepared?.source === "phone_watch"
+            || failureReplyTarget?.source === "checkin"
+            || failureReplyTarget?.source === "phone_watch";
+          if (!isSilentSource) {
             await this.sendFailureToThread(
               event.payload.threadId,
               event.payload.text || "❌ Execution failed",
               failureReplyTarget,
             );
           } else {
+            const failureLabel = (activeDispatch?.prepared?.source === "phone_watch" || failureReplyTarget?.source === "phone_watch")
+              ? "phone_watch"
+              : "checkin";
             const checkinError = formatCheckinErrorMessage(event.payload?.text || "unknown error");
-            console.warn(`[cyberboss] checkin runtime failed: ${checkinError}`);
+            console.warn(`[cyberboss] ${failureLabel} runtime failed: ${checkinError}`);
           }
         }
         if (linked?.bindingKey && linked?.workspaceRoot) {
@@ -1695,7 +1711,7 @@ class CyberbossApp {
     if (!target) {
       return;
     }
-    if (target.source === "checkin") {
+    if (target.source === "checkin" || target.source === "phone_watch") {
       return;
     }
     await this.channelAdapter.sendText({

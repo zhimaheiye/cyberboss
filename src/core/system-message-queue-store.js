@@ -102,7 +102,8 @@ function normalizeSystemMessage(message) {
     return null;
   }
 
-  const source = normalizeText(message.source) === "checkin" ? "checkin" : "system";
+  const rawSource = normalizeText(message.source);
+  const source = rawSource === "checkin" || rawSource === "phone_watch" ? rawSource : "system";
   const attempts = Number.isInteger(message.attempts) && message.attempts >= 0 ? message.attempts : 0;
   const nextAttemptAt = normalizeIsoTime(message.nextAttemptAt) || "";
 

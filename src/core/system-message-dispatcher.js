@@ -37,8 +37,8 @@ class SystemMessageDispatcher {
       return null;
     }
 
-    if (message.source === "checkin") {
-      console.log(`[cyberboss] checkin system message failed; dropped id=${message.id}`);
+    if (message.source === "checkin" || message.source === "phone_watch") {
+      console.log(`[cyberboss] ${message.source} system message failed; dropped id=${message.id}`);
       return null;
     }
 
@@ -68,6 +68,8 @@ class SystemMessageDispatcher {
   }
 
   buildPreparedMessage(message, contextToken = "") {
+    const rawSource = normalizeText(message?.source);
+    const source = rawSource === "checkin" || rawSource === "phone_watch" ? rawSource : "system";
     return {
       provider: "system",
       workspaceId: this.config.workspaceId,
@@ -82,7 +84,7 @@ class SystemMessageDispatcher {
       contextToken,
       receivedAt: normalizeIsoTime(message?.createdAt) || new Date().toISOString(),
       workspaceRoot: this.resolveWorkspaceRoot(message),
-      source: normalizeText(message?.source) === "checkin" ? "checkin" : "system",
+      source,
     };
   }
 }

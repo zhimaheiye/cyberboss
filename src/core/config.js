@@ -100,6 +100,18 @@ function readConfig() {
     runtimeFailureWindowMs: readIntEnv("CYBERBOSS_RUNTIME_FAILURE_WINDOW_MS") ?? 900_000,
     runtimeIncidentCooldownMs: readIntEnv("CYBERBOSS_RUNTIME_INCIDENT_COOLDOWN_MS") ?? 1_800_000,
     startWithCheckin: (mode === "start" && hasArgFlag(argv, "--checkin")) || readBoolEnv("CYBERBOSS_ENABLE_CHECKIN"),
+    phoneWatchStateFile: path.join(stateDir, "phone-watch-state.json"),
+    phoneWatchEnabled: resolvePhoneWatchEnabled({
+      mode,
+      argv,
+      enabled: readOptionalBoolEnv("CYBERBOSS_PHONE_WATCH_ENABLED"),
+    }),
+    phoneWatchIntervalMs: readIntEnv("CYBERBOSS_PHONE_WATCH_INTERVAL_MS") || 300_000,
+    phoneWatchTriggerAfterMs: readIntEnv("CYBERBOSS_PHONE_WATCH_TRIGGER_AFTER_MS") || 600_000,
+    phoneWatchTriggerCooldownMs: readIntEnv("CYBERBOSS_PHONE_WATCH_TRIGGER_COOLDOWN_MS") || 900_000,
+    phoneWatchInactiveResetMs: readIntEnv("CYBERBOSS_PHONE_WATCH_INACTIVE_RESET_MS") || 600_000,
+    vegliaUrl: readTextEnv("CYBERBOSS_VEGLIA_URL") || "http://127.0.0.1:8513",
+    vegliaToken: readTextEnv("CYBERBOSS_VEGLIA_TOKEN"),
   };
 }
 
@@ -189,6 +201,19 @@ function resolveLocationServerEnabled({ mode, enabled }) {
     return enabled;
   }
   return false;
+}
+
+function resolvePhoneWatchEnabled({ mode, argv, enabled }) {
+  if (enabled !== undefined) {
+    return enabled;
+  }
+  if (hasArgFlag(argv, "--phone-watch")) {
+    return true;
+  }
+  if (hasArgFlag(argv, "--no-phone-watch")) {
+    return false;
+  }
+  return mode === "start";
 }
 
 module.exports = { readConfig };
