@@ -695,11 +695,15 @@ function normalizeReplyTarget(target) {
   if (!target?.userId || !target?.contextToken) {
     return null;
   }
-  return {
+  const normalized = {
     userId: String(target.userId).trim(),
     contextToken: String(target.contextToken).trim(),
     provider: normalizeText(target.provider),
   };
+  if (target.source) {
+    normalized.source = normalizeText(target.source);
+  }
+  return normalized;
 }
 
 function normalizeLineEndings(value) {

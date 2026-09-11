@@ -106,6 +106,7 @@ class CyberbossApp {
       onDeferredSystemReply: (payload) => this.deferSystemReply(payload),
     });
     this.pendingOperationByRunKey = new Map();
+    this.activeDispatchByScopeKey = new Map();
     this.runtimeEventChain = Promise.resolve();
     this.runtimeAdapter.onEvent((event) => {
       this.threadStateStore.applyRuntimeEvent(event);
@@ -445,12 +446,39 @@ class CyberbossApp {
   }
 
   async dispatchPreparedTurn({ bindingKey, workspaceRoot, prepared }) {
+    const scopeKey = buildScopeKey(bindingKey, workspaceRoot);
     const pendingScopeKey = this.turnGateStore.begin(bindingKey, workspaceRoot);
     await this.channelAdapter.sendTyping({
       userId: prepared.senderId,
       status: 1,
       contextToken: prepared.contextToken,
     }).catch(() => {});
+
+    let terminalFailureEmitted = false;
+    let terminalCompletedEmitted = false;
+
+    const dispatchState = {
+      bindingKey,
+      workspaceRoot,
+      prepared,
+      terminalFailureEmitted: false,
+      terminalCompletedEmitted: false,
+    };
+    if (scopeKey && this.activeDispatchByScopeKey) {
+      this.activeDispatchByScopeKey.set(scopeKey, dispatchState);
+    }
+
+    const unsubscribe = typeof this.runtimeAdapter?.onEvent === "function"
+      ? this.runtimeAdapter.onEvent((event) => {
+          if (event?.type === "runtime.turn.failed") {
+            terminalFailureEmitted = true;
+            dispatchState.terminalFailureEmitted = true;
+          } else if (event?.type === "runtime.turn.completed") {
+            terminalCompletedEmitted = true;
+            dispatchState.terminalCompletedEmitted = true;
+          }
+        })
+      : null;
 
     try {
       const model = this.runtimeAdapter.getSessionStore().getRuntimeParamsForWorkspace(bindingKey, workspaceRoot).model;
@@ -470,6 +498,9 @@ class CyberbossApp {
           senderId: prepared.senderId,
         },
       });
+      if (turn?.threadId) {
+        dispatchState.threadId = turn.threadId;
+      }
       this.runtimeContextStore?.setActiveContext?.({
         workspaceRoot,
         runtimeId: this.runtimeAdapter.describe().id,
@@ -483,6 +514,7 @@ class CyberbossApp {
         userId: prepared.senderId,
         contextToken: prepared.contextToken,
         provider: prepared.provider,
+        ...(prepared.source ? { source: prepared.source } : {}),
       };
       if (turn.turnId) {
         this.streamDelivery.bindReplyTargetForTurn({
@@ -498,16 +530,28 @@ class CyberbossApp {
       this.turnGateStore.releaseScope(bindingKey, workspaceRoot);
       const messageText = error instanceof Error ? error.message : String(error || "unknown error");
       if (prepared?.source !== "checkin") {
-        await this.channelAdapter.sendText({
-          userId: prepared.senderId,
-          text: `❌ Request failed\n${messageText}`,
-          contextToken: prepared.contextToken,
-        }).catch(() => {});
+        if (!terminalFailureEmitted && !terminalCompletedEmitted) {
+          await this.channelAdapter.sendText({
+            userId: prepared.senderId,
+            text: `❌ Request failed\n${messageText}`,
+            contextToken: prepared.contextToken,
+          }).catch(() => {});
+        }
       } else {
         const checkinError = formatCheckinErrorMessage(error);
         console.warn(`[cyberboss] checkin runtime failed: ${checkinError}`);
       }
       return false;
+    } finally {
+      if (typeof unsubscribe === "function") {
+        unsubscribe();
+      }
+      if (this.runtimeEventChain) {
+        await this.runtimeEventChain.catch(() => {});
+      }
+      if (scopeKey && this.activeDispatchByScopeKey) {
+        this.activeDispatchByScopeKey.delete(scopeKey);
+      }
     }
   }
 
@@ -1533,11 +1577,24 @@ class CyberbossApp {
           this.turnGateStore.releaseScope(linked.bindingKey, linked.workspaceRoot);
         }
         if (event.type === "runtime.turn.failed") {
-          await this.sendFailureToThread(
-            event.payload.threadId,
-            event.payload.text || "❌ Execution failed",
-            failureReplyTarget,
-          );
+          const effectiveScopeKey = scopeKey || this.turnGateStore?.scopeByThreadId?.get?.(event.payload.threadId) || "";
+          let activeDispatch = effectiveScopeKey && this.activeDispatchByScopeKey
+            ? this.activeDispatchByScopeKey.get(effectiveScopeKey)
+            : null;
+          if (!activeDispatch && this.activeDispatchByScopeKey?.size === 1) {
+            activeDispatch = this.activeDispatchByScopeKey.values().next().value;
+          }
+          const isCheckin = activeDispatch?.prepared?.source === "checkin" || failureReplyTarget?.source === "checkin";
+          if (!isCheckin) {
+            await this.sendFailureToThread(
+              event.payload.threadId,
+              event.payload.text || "❌ Execution failed",
+              failureReplyTarget,
+            );
+          } else {
+            const checkinError = formatCheckinErrorMessage(event.payload?.text || "unknown error");
+            console.warn(`[cyberboss] checkin runtime failed: ${checkinError}`);
+          }
         }
         if (linked?.bindingKey && linked?.workspaceRoot) {
           await this.flushPendingInboundMessages({
@@ -1636,6 +1693,9 @@ class CyberbossApp {
       linked?.bindingKey ? this.resolveReplyTargetForBinding(linked.bindingKey) : null
     ) || normalizeReplyTarget(fallbackTarget);
     if (!target) {
+      return;
+    }
+    if (target.source === "checkin") {
       return;
     }
     await this.channelAdapter.sendText({
