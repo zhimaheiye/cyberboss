@@ -1718,7 +1718,11 @@ class CyberbossApp {
       userId: target.userId,
       text: normalizeText(text) || "❌ Execution failed",
       contextToken: target.contextToken,
-    }).catch(() => {});
+    }).catch((err) => {
+      console.warn(
+        `[cyberboss] failed to deliver runtime failure to WeChat thread=${threadId || ""} user=${target.userId || ""} error=${err?.message || String(err)}`
+      );
+    });
   }
 
   async sendApprovalPrompt({ bindingKey, approval }) {
