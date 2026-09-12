@@ -421,6 +421,7 @@ Agent-facing Cyberboss capabilities are project-native structured tools.
 ### Common project tools
 
 - `cyberboss_reminder_create`
+- `cyberboss_internal_reminder_create`
 - `cyberboss_diary_append`
 - `cyberboss_timeline_write`
 - `cyberboss_timeline_build`

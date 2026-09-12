@@ -9,6 +9,7 @@ const { SystemMessageDispatcher, buildSystemInboundText } = require("../src/core
 const { ReminderQueueStore } = require("../src/adapters/channel/weixin/reminder-queue-store");
 const { CyberbossApp } = require("../src/core/app");
 const { readConfig } = require("../src/core/config");
+const { ProjectToolHost } = require("../src/tools/tool-host");
 
 function createDeliveryHarness({ sendText, getKnownContextTokens, runtimeId = "" } = {}) {
   const sent = [];
@@ -426,3 +427,113 @@ test("13. CyberbossApp dispatchPreparedTurn catch and sendFailureToThread delive
   assert.equal(sent.length, 1);
   assert.equal(sent[0].text, "1分钟后提醒我喝水", "sendFailureToThread delivers fallback reminder text instead of error");
 });
+
+test("14. cyberboss_reminder_create enforces origin=user, deliveryRequired=true and rejects schema override", async () => {
+  let createdArgs = null;
+  const host = new ProjectToolHost({
+    services: {
+      reminder: {
+        async create(args) {
+          createdArgs = args;
+          return { id: "rem-user-1", ...args };
+        },
+      },
+    },
+    runtimeContextStore: {
+      resolveActiveContext() {
+        return {};
+      },
+    },
+  });
+
+  const result = await host.invokeTool("cyberboss_reminder_create", {
+    text: "喝水",
+    delayMinutes: 10,
+  }, {});
+
+  assert.equal(createdArgs.origin, "user");
+  assert.equal(createdArgs.deliveryRequired, true);
+  assert.equal(createdArgs.text, "喝水");
+  assert.ok(result.text.includes("Reminder queued: rem-user-1"));
+
+  await assert.rejects(async () => {
+    await host.invokeTool("cyberboss_reminder_create", {
+      text: "喝水",
+      origin: "internal",
+    }, {});
+  }, /input\.origin is not allowed/);
+
+  await assert.rejects(async () => {
+    await host.invokeTool("cyberboss_reminder_create", {
+      text: "喝水",
+      deliveryRequired: false,
+    }, {});
+  }, /input\.deliveryRequired is not allowed/);
+});
+
+test("15. cyberboss_internal_reminder_create enforces origin=internal, deliveryRequired=false and rejects schema override", async () => {
+  let createdArgs = null;
+  const host = new ProjectToolHost({
+    services: {
+      reminder: {
+        async create(args) {
+          createdArgs = args;
+          return { id: "rem-internal-1", ...args };
+        },
+      },
+    },
+    runtimeContextStore: {
+      resolveActiveContext() {
+        return {};
+      },
+    },
+  });
+
+  const result = await host.invokeTool("cyberboss_internal_reminder_create", {
+    text: "检查用户是否还在刷手机",
+    delayMinutes: 20,
+  }, {});
+
+  assert.equal(createdArgs.origin, "internal");
+  assert.equal(createdArgs.deliveryRequired, false);
+  assert.equal(createdArgs.text, "检查用户是否还在刷手机");
+  assert.ok(result.text.includes("Internal reminder queued: rem-internal-1"));
+
+  await assert.rejects(async () => {
+    await host.invokeTool("cyberboss_internal_reminder_create", {
+      text: "检查状态",
+      deliveryRequired: true,
+    }, {});
+  }, /input\.deliveryRequired is not allowed/);
+
+  await assert.rejects(async () => {
+    await host.invokeTool("cyberboss_internal_reminder_create", {
+      text: "检查状态",
+      origin: "user",
+    }, {});
+  }, /input\.origin is not allowed/);
+});
+
+test("16. internal reminder returning send_message sends message normally and skips fallback", async () => {
+  const { sent, streamDelivery } = createDeliveryHarness();
+  streamDelivery.queueReplyTargetForThread("thread-internal-msg", {
+    userId: "user-internal-2",
+    contextToken: "ctx-internal-2",
+    provider: "system",
+    source: "reminder",
+    deliveryRequired: false,
+    fallbackText: "internal note text",
+  });
+
+  await runCompletedTurn(streamDelivery, {
+    threadId: "thread-internal-msg",
+    turnId: "turn-int-1",
+    itemId: "item-int-1",
+    text: "{\"action\":\"send_message\",\"message\":\"休息一下吧，你已经学很久了\"}",
+  });
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].text, "休息一下吧，你已经学很久了");
+  assert.equal(sent[0].userId, "user-internal-2");
+});
+

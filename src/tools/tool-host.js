@@ -94,8 +94,8 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_reminder_create",
-    description: "Create a reminder in Cyberboss.",
-    shortHint: "Create a reminder with direct text plus delayMinutes or dueAt.",
+    description: "Use this when the user explicitly asks to be reminded later. User-requested reminders are guaranteed to be delivered.",
+    shortHint: "Create a user-requested reminder that is guaranteed to be delivered to WeChat.",
     topics: ["reminder"],
     inputSchema: {
       type: "object",
@@ -109,9 +109,41 @@ const PROJECT_TOOLS = [
       additionalProperties: false,
     },
     async handler({ services, args, context }) {
-      const result = await services.reminder.create(args, context);
+      const result = await services.reminder.create({
+        ...args,
+        origin: "user",
+        deliveryRequired: true,
+      }, context);
       return {
         text: `Reminder queued: ${result.id}`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_internal_reminder_create",
+    description: "Use only for a future checkpoint you decide to create proactively for yourself when the user did NOT explicitly request a reminder. This reminder may later be handled contextually and may remain silent.",
+    shortHint: "Create an internal checkpoint reminder for yourself that can be handled contextually or stay silent.",
+    topics: ["reminder"],
+    inputSchema: {
+      type: "object",
+      required: ["text"],
+      properties: {
+        text: { type: "string", description: "Internal reminder text or checkpoint note." },
+        delayMinutes: { type: "integer", description: "Minutes from now before the reminder fires." },
+        dueAt: { type: "string", description: "Absolute time such as 2026-04-07T21:30+08:00." },
+        userId: { type: "string", description: "Optional explicit WeChat user id." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args, context }) {
+      const result = await services.reminder.create({
+        ...args,
+        origin: "internal",
+        deliveryRequired: false,
+      }, context);
+      return {
+        text: `Internal reminder queued: ${result.id}`,
         data: result,
       };
     },
