@@ -324,8 +324,23 @@ class StreamDelivery {
 
     const replyText = buildReplyText(state, { completedOnly: false });
     const resolved = resolveSystemReplyDelivery(replyText, this.systemReplyPolicy);
+    const isDeliveryRequiredReminder = state.replyTarget?.source === "reminder" && Boolean(state.replyTarget?.deliveryRequired);
+    const fallbackText = state.replyTarget?.fallbackText || "";
+
     if (resolved.kind === "silent") {
       this.markAllItemsSent(state);
+      if (isDeliveryRequiredReminder && fallbackText) {
+        console.warn(
+          `[cyberboss] reminder delivery fallback triggered for thread=${state.threadId} (model returned silent)`
+        );
+        state.sendChain = state.sendChain.then(async () => {
+          await this.sendSystemReply(state, fallbackText);
+        }).catch((error) => {
+          console.error(`[cyberboss] failed to deliver fallback reminder thread=${state.threadId}: ${error.message}`);
+        });
+        await state.sendChain;
+        return;
+      }
       console.log(
         `[cyberboss] suppressed system reply thread=${state.threadId} action=silent preview=${JSON.stringify(replyText.slice(0, 120))}`
       );
@@ -336,6 +351,18 @@ class StreamDelivery {
       console.error(
         `[cyberboss] invalid system reply thread=${state.threadId} reason=${resolved.reason} preview=${JSON.stringify(replyText.slice(0, 160))}`
       );
+      this.markAllItemsSent(state);
+      if (isDeliveryRequiredReminder && fallbackText) {
+        console.warn(
+          `[cyberboss] reminder delivery fallback triggered for thread=${state.threadId} (model returned non-send_message: ${resolved.reason})`
+        );
+        state.sendChain = state.sendChain.then(async () => {
+          await this.sendSystemReply(state, fallbackText);
+        }).catch((error) => {
+          console.error(`[cyberboss] failed to deliver fallback reminder thread=${state.threadId}: ${error.message}`);
+        });
+        await state.sendChain;
+      }
       return;
     }
 
@@ -533,11 +560,8 @@ class StreamDelivery {
   }
 
   applyThreadReplyTarget(state, target) {
-    state.replyTarget = {
-      userId: target.userId,
-      contextToken: target.contextToken,
-      provider: target.provider,
-    };
+    const normalized = normalizeReplyTarget(target);
+    state.replyTarget = normalized ? { ...normalized } : null;
     state.threadReplyTargetAttached = true;
   }
 
@@ -702,6 +726,12 @@ function normalizeReplyTarget(target) {
   };
   if (target.source) {
     normalized.source = normalizeText(target.source);
+  }
+  if (typeof target.deliveryRequired === "boolean") {
+    normalized.deliveryRequired = target.deliveryRequired;
+  }
+  if (target.fallbackText) {
+    normalized.fallbackText = String(target.fallbackText).trim();
   }
   return normalized;
 }

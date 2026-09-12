@@ -522,6 +522,8 @@ class CyberbossApp {
         contextToken: prepared.contextToken,
         provider: prepared.provider,
         ...(prepared.source ? { source: prepared.source } : {}),
+        ...(typeof prepared.deliveryRequired === "boolean" ? { deliveryRequired: prepared.deliveryRequired } : {}),
+        ...(prepared.fallbackText ? { fallbackText: prepared.fallbackText } : {}),
       };
       if (turn.turnId) {
         this.streamDelivery.bindReplyTargetForTurn({
@@ -539,9 +541,14 @@ class CyberbossApp {
       const isSilentSource = prepared?.source === "checkin" || prepared?.source === "phone_watch";
       if (!isSilentSource) {
         if (!terminalFailureEmitted && !terminalCompletedEmitted) {
+          const isDeliveryRequiredReminder = prepared?.source === "reminder" && Boolean(prepared?.deliveryRequired);
+          const fallbackText = prepared?.fallbackText || prepared?.reminderText || "";
+          const textToSend = (isDeliveryRequiredReminder && fallbackText)
+            ? fallbackText
+            : `❌ Request failed\n${messageText}`;
           await this.channelAdapter.sendText({
             userId: prepared.senderId,
-            text: `❌ Request failed\n${messageText}`,
+            text: textToSend,
             contextToken: prepared.contextToken,
           }).catch(() => {});
         }
@@ -995,7 +1002,13 @@ class CyberbossApp {
           workspaceRoot: this.resolveReminderWorkspaceRoot(reminder),
           text: buildReminderSystemTrigger(reminder, this.config),
           createdAt: new Date().toISOString(),
-          source: "system",
+          source: "reminder",
+          origin: reminder.origin || "user",
+          deliveryRequired: reminder.deliveryRequired !== false,
+          reminderId: reminder.id,
+          reminderText: reminder.text,
+          fallbackText: reminder.text,
+          dueAtMs: reminder.dueAtMs,
         });
       } catch {
         this.reminderQueue.enqueue({
@@ -1598,11 +1611,19 @@ class CyberbossApp {
             || activeDispatch?.prepared?.source === "phone_watch"
             || failureReplyTarget?.source === "checkin"
             || failureReplyTarget?.source === "phone_watch";
+          const combinedFailureTarget = {
+            ...(activeDispatch?.prepared ? {
+              source: activeDispatch.prepared.source,
+              deliveryRequired: activeDispatch.prepared.deliveryRequired,
+              fallbackText: activeDispatch.prepared.fallbackText || activeDispatch.prepared.reminderText,
+            } : {}),
+            ...failureReplyTarget,
+          };
           if (!isSilentSource) {
             await this.sendFailureToThread(
               event.payload.threadId,
               event.payload.text || "❌ Execution failed",
-              failureReplyTarget,
+              combinedFailureTarget,
             );
           } else {
             const failureLabel = (activeDispatch?.prepared?.source === "phone_watch" || failureReplyTarget?.source === "phone_watch")
@@ -1705,18 +1726,24 @@ class CyberbossApp {
 
   async sendFailureToThread(threadId, text, fallbackTarget = null) {
     const linked = this.runtimeAdapter.getSessionStore().findBindingForThreadId(threadId);
-    const target = normalizeReplyTarget(
-      linked?.bindingKey ? this.resolveReplyTargetForBinding(linked.bindingKey) : null
-    ) || normalizeReplyTarget(fallbackTarget);
+    const bindingTarget = linked?.bindingKey ? this.resolveReplyTargetForBinding(linked.bindingKey) : null;
+    const target = normalizeReplyTarget({
+      ...fallbackTarget,
+      ...bindingTarget,
+    }) || normalizeReplyTarget(fallbackTarget);
     if (!target) {
       return;
     }
     if (target.source === "checkin" || target.source === "phone_watch") {
       return;
     }
+    const isDeliveryRequiredReminder = target.source === "reminder" && Boolean(target.deliveryRequired);
+    const effectiveText = (isDeliveryRequiredReminder && target.fallbackText)
+      ? target.fallbackText
+      : (normalizeText(text) || "❌ Execution failed");
     await this.channelAdapter.sendText({
       userId: target.userId,
-      text: normalizeText(text) || "❌ Execution failed",
+      text: effectiveText,
       contextToken: target.contextToken,
     }).catch((err) => {
       console.warn(
@@ -1811,11 +1838,21 @@ function normalizeReplyTarget(target) {
   if (!target?.userId || !target?.contextToken) {
     return null;
   }
-  return {
+  const normalized = {
     userId: String(target.userId).trim(),
     contextToken: String(target.contextToken).trim(),
     provider: normalizeText(target.provider),
   };
+  if (target.source) {
+    normalized.source = normalizeText(target.source);
+  }
+  if (typeof target.deliveryRequired === "boolean") {
+    normalized.deliveryRequired = target.deliveryRequired;
+  }
+  if (target.fallbackText) {
+    normalized.fallbackText = String(target.fallbackText).trim();
+  }
+  return normalized;
 }
 
 function formatCompactNumber(value) {

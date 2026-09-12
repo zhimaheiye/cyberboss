@@ -87,6 +87,12 @@ function normalizeReminder(reminder) {
   if (!id || !accountId || !senderId || !contextToken || !text || !Number.isFinite(dueAtMs) || dueAtMs <= 0) {
     return null;
   }
+  const rawOrigin = typeof reminder.origin === "string" ? reminder.origin.trim().toLowerCase() : "";
+  const origin = rawOrigin === "internal" ? "internal" : "user";
+  const deliveryRequired = typeof reminder.deliveryRequired === "boolean"
+    ? reminder.deliveryRequired
+    : (origin !== "internal");
+
   return {
     id,
     accountId,
@@ -95,7 +101,11 @@ function normalizeReminder(reminder) {
     text,
     dueAtMs,
     createdAt: createdAt || new Date().toISOString(),
+    origin,
+    deliveryRequired,
   };
 }
 
-module.exports = { ReminderQueueStore };
+ReminderQueueStore.normalizeReminder = normalizeReminder;
+
+module.exports = { ReminderQueueStore, normalizeReminder };

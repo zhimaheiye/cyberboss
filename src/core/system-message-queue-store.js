@@ -103,9 +103,21 @@ function normalizeSystemMessage(message) {
   }
 
   const rawSource = normalizeText(message.source);
-  const source = rawSource === "checkin" || rawSource === "phone_watch" ? rawSource : "system";
+  const source = (rawSource === "checkin" || rawSource === "phone_watch" || rawSource === "reminder")
+    ? rawSource
+    : "system";
   const attempts = Number.isInteger(message.attempts) && message.attempts >= 0 ? message.attempts : 0;
   const nextAttemptAt = normalizeIsoTime(message.nextAttemptAt) || "";
+
+  const origin = (typeof message.origin === "string" && message.origin.trim().toLowerCase() === "internal")
+    ? "internal"
+    : "user";
+  const deliveryRequired = typeof message.deliveryRequired === "boolean"
+    ? message.deliveryRequired
+    : (source === "reminder" && origin !== "internal");
+  const fallbackText = normalizeText(message.fallbackText || message.reminderText || "");
+  const reminderText = normalizeText(message.reminderText || message.fallbackText || "");
+  const dueAtMs = Number.isFinite(Number(message.dueAtMs)) && Number(message.dueAtMs) > 0 ? Number(message.dueAtMs) : null;
 
   return {
     id,
@@ -117,6 +129,13 @@ function normalizeSystemMessage(message) {
     source,
     attempts,
     nextAttemptAt,
+    ...(source === "reminder" ? {
+      origin,
+      deliveryRequired,
+      fallbackText,
+      reminderText,
+      ...(dueAtMs ? { dueAtMs } : {}),
+    } : {}),
   };
 }
 

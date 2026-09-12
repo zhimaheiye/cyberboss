@@ -69,7 +69,17 @@ class SystemMessageDispatcher {
 
   buildPreparedMessage(message, contextToken = "") {
     const rawSource = normalizeText(message?.source);
-    const source = rawSource === "checkin" || rawSource === "phone_watch" ? rawSource : "system";
+    const source = (rawSource === "checkin" || rawSource === "phone_watch" || rawSource === "reminder")
+      ? rawSource
+      : "system";
+    const origin = (typeof message?.origin === "string" && message.origin.trim().toLowerCase() === "internal")
+      ? "internal"
+      : "user";
+    const deliveryRequired = typeof message?.deliveryRequired === "boolean"
+      ? message.deliveryRequired
+      : (source === "reminder" && origin !== "internal");
+    const fallbackText = normalizeText(message?.reminderText || message?.fallbackText || "");
+
     return {
       provider: "system",
       workspaceId: this.config.workspaceId,
@@ -78,20 +88,71 @@ class SystemMessageDispatcher {
       threadKey: `system:${message.senderId}`,
       senderId: message.senderId,
       messageId: message.id,
-      text: buildSystemInboundText(message?.text, message?.createdAt),
+      text: buildSystemInboundText(message?.text, message?.createdAt, {
+        source,
+        origin,
+        deliveryRequired,
+        reminderText: message?.reminderText || "",
+        dueAtMs: message?.dueAtMs,
+      }),
       attachments: [],
       command: "message",
       contextToken,
       receivedAt: normalizeIsoTime(message?.createdAt) || new Date().toISOString(),
       workspaceRoot: this.resolveWorkspaceRoot(message),
       source,
+      origin,
+      deliveryRequired,
+      fallbackText,
     };
   }
 }
 
-function buildSystemInboundText(text, createdAt = "") {
+function buildSystemInboundText(text, createdAt = "", options = {}) {
   const body = normalizeText(text);
   const localTime = formatSystemLocalTime(createdAt);
+  const source = normalizeText(options?.source);
+  const deliveryRequired = Boolean(options?.deliveryRequired);
+
+  if (source === "reminder") {
+    const sections = [
+      ...(localTime ? [`[${localTime}]`, ""] : []),
+      `SYSTEM ACTION MODE: internal trigger (source=reminder, deliveryRequired=${deliveryRequired}).`,
+      "",
+      "CRITICAL REMINDER RULES:",
+      "- No background daemon, reminder poller, or other service has sent or will send this reminder text to the user.",
+      "- This turn is the SOLE delivery step.",
+      "- Do NOT assume the reminder was already delivered merely because it was scheduled, mentioned earlier, or because the trigger text is in system context.",
+    ];
+
+    if (deliveryRequired) {
+      sections.push(
+        "- FINAL ACTION REQUIREMENT: You MUST finish with send_message to deliver the reminder to the user on WeChat.",
+        "- The 'silent' action is STRICTLY INVALID for this reminder. Do NOT suppress this reminder under any circumstances.",
+        "- Diary, timeline, or whereabouts actions may be performed in this turn, but they CANNOT replace the user-facing WeChat message.",
+        "- You may adapt wording naturally based on current context, but you must send the message.",
+        "",
+        "Return exactly one JSON object after any tool calls:",
+        "{\"action\":\"send_message\",\"message\":\"<one short natural WeChat message>\"}",
+        "No markdown fences. No reasoning. No text outside the JSON."
+      );
+    } else {
+      sections.push(
+        "- This is an internal/proactive reminder. You may send a message or record a diary/note or choose silent if interrupting the user is inappropriate.",
+        "",
+        "Return exactly one JSON object after any tool calls:",
+        "{\"action\":\"silent\"}",
+        "{\"action\":\"send_message\",\"message\":\"<one short natural WeChat message>\"}",
+        "No markdown fences. No reasoning. No text outside the JSON."
+      );
+    }
+
+    if (body) {
+      sections.push("", "Trigger:", body);
+    }
+    return sections.join("\n").trim();
+  }
+
   const sections = [
     ...(localTime ? [`[${localTime}]`, ""] : []),
     "SYSTEM ACTION MODE: internal trigger, not user chat.",
@@ -144,4 +205,5 @@ module.exports = {
   SystemMessageDispatcher,
   SYSTEM_MESSAGE_RETRY_BACKOFF_MS,
   MAX_SYSTEM_MESSAGE_RETRIES,
+  buildSystemInboundText,
 };
