@@ -283,6 +283,9 @@ class StreamDelivery {
 
   async flushNow(state, { force }) {
     if (!state.replyTarget) {
+      console.warn(
+        `[cyberboss] reply delivery skipped: missing reply target thread=${state.threadId} turn=${state.turnId || "(unknown)"}`
+      );
       return;
     }
 
@@ -415,7 +418,21 @@ class StreamDelivery {
       text,
       contextToken: initialTarget.contextToken,
     };
-    await this.sendTextWithRetry(state, payload, { kind: "system_reply" });
+    const source = initialTarget.source || "system";
+    console.log(
+      `[cyberboss] proactive send attempt source=${source} thread=${state.threadId} user=${initialTarget.userId}`
+    );
+    try {
+      await this.sendTextWithRetry(state, payload, { kind: "system_reply" });
+      console.log(
+        `[cyberboss] proactive send success source=${source} thread=${state.threadId} user=${initialTarget.userId}`
+      );
+    } catch (error) {
+      console.error(
+        `[cyberboss] proactive send failed source=${source} thread=${state.threadId} user=${initialTarget.userId} error=${error.message}`
+      );
+      throw error;
+    }
   }
 
   async sendTextWithRetry(state, payload, { kind }) {

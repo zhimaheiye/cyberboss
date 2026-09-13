@@ -488,6 +488,20 @@ class CyberbossApp {
       : null;
 
     try {
+      const replyTarget = {
+        userId: prepared.senderId,
+        contextToken: prepared.contextToken,
+        provider: prepared.provider,
+        ...(prepared.source ? { source: prepared.source } : {}),
+        ...(typeof prepared.deliveryRequired === "boolean" ? { deliveryRequired: prepared.deliveryRequired } : {}),
+        ...(prepared.fallbackText ? { fallbackText: prepared.fallbackText } : {}),
+      };
+      this.streamDelivery?.setReplyTarget?.(bindingKey, replyTarget);
+      const existingThreadId = this.runtimeAdapter?.getSessionStore?.()?.getThreadIdForWorkspace?.(bindingKey, workspaceRoot);
+      if (existingThreadId) {
+        this.streamDelivery?.queueReplyTargetForThread?.(existingThreadId, replyTarget);
+      }
+
       const model = this.runtimeAdapter.getSessionStore().getRuntimeParamsForWorkspace(bindingKey, workspaceRoot).model;
       const runtimeTurn = await this.buildRuntimeTurn({ prepared, model });
       const sendTurn = typeof this.runtimeAdapter.sendTurn === "function"
@@ -517,22 +531,14 @@ class CyberbossApp {
         senderId: prepared.senderId,
       });
       this.turnGateStore.attachThread(pendingScopeKey, turn.threadId);
-      const replyTarget = {
-        userId: prepared.senderId,
-        contextToken: prepared.contextToken,
-        provider: prepared.provider,
-        ...(prepared.source ? { source: prepared.source } : {}),
-        ...(typeof prepared.deliveryRequired === "boolean" ? { deliveryRequired: prepared.deliveryRequired } : {}),
-        ...(prepared.fallbackText ? { fallbackText: prepared.fallbackText } : {}),
-      };
-      if (turn.turnId) {
-        this.streamDelivery.bindReplyTargetForTurn({
+      if (turn?.turnId) {
+        this.streamDelivery?.bindReplyTargetForTurn?.({
           threadId: turn.threadId,
           turnId: turn.turnId,
           target: replyTarget,
         });
-      } else {
-        this.streamDelivery.queueReplyTargetForThread(turn.threadId, replyTarget);
+      } else if (turn?.threadId) {
+        this.streamDelivery?.queueReplyTargetForThread?.(turn.threadId, replyTarget);
       }
       return true;
     } catch (error) {
@@ -1029,9 +1035,21 @@ class CyberbossApp {
   }
 
   async dispatchSystemMessage(message) {
-    const prepared = this.systemMessageDispatcher?.buildPreparedMessage(message, this.channelAdapter.getKnownContextTokens()[message.senderId] || "");
+    const knownTokens = this.channelAdapter.getKnownContextTokens();
+    const contextToken = knownTokens[message.senderId] || "";
+    const isSilentSource = message?.source === "checkin" || message?.source === "phone_watch";
+    if (isSilentSource && !contextToken) {
+      console.warn(
+        `[cyberboss] proactive turn skipped: missing valid context token for user=${message.senderId} source=${message.source}`
+      );
+      return true;
+    }
+    const prepared = this.systemMessageDispatcher?.buildPreparedMessage(message, contextToken);
     if (!prepared) {
       throw new Error("system message could not be prepared");
+    }
+    if (prepared.contextToken && contextToken && prepared.contextToken !== contextToken) {
+      throw new Error(`Context token mismatch: prepared for ${prepared.senderId} does not match token cache`);
     }
     const bindingKey = this.runtimeAdapter.getSessionStore().buildBindingKey({
       workspaceId: prepared.workspaceId,
