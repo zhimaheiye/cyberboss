@@ -7,29 +7,48 @@ function resolvePreferredSenderId({
   sessionStore = null,
 }) {
   const normalizedExplicitUser = normalizeText(explicitUser);
-  if (normalizedExplicitUser) {
-    return normalizedExplicitUser;
-  }
+  const persistedTokens = loadPersistedContextTokens(config, accountId) || {};
 
-  const configuredUsers = Array.isArray(config?.allowedUserIds)
-    ? config.allowedUserIds.map((value) => normalizeText(value)).filter(Boolean)
-    : [];
-  if (configuredUsers.length) {
-    return configuredUsers[0];
+  if (normalizedExplicitUser) {
+    if (persistedTokens[normalizedExplicitUser]) {
+      return normalizedExplicitUser;
+    }
+    console.warn(
+      `[cyberboss] explicit proactive senderId has no valid context token user=${normalizedExplicitUser}`
+    );
+    return "";
   }
 
   const bindingCandidates = collectBindingSenderIds({ config, accountId, sessionStore });
-  if (bindingCandidates.length === 1) {
-    return bindingCandidates[0];
+  const candidatesWithToken = bindingCandidates.filter((userId) => Boolean(persistedTokens[userId]));
+
+  if (candidatesWithToken.length === 1) {
+    return candidatesWithToken[0];
   }
 
-  const persistedUserIds = Object.keys(loadPersistedContextTokens(config, accountId) || {})
+  if (candidatesWithToken.length > 1) {
+    console.warn(
+      `[cyberboss] ambiguous proactive target: multiple bound users have context tokens (${candidatesWithToken.join(", ")})`
+    );
+    return "";
+  }
+
+  const tokenUsers = Object.keys(persistedTokens)
     .map((value) => normalizeText(value))
-    .filter(Boolean);
-  if (persistedUserIds.length === 1) {
-    return persistedUserIds[0];
+    .filter((value) => Boolean(persistedTokens[value]));
+
+  if (tokenUsers.length === 1) {
+    return tokenUsers[0];
   }
 
+  if (tokenUsers.length > 1) {
+    console.warn(
+      `[cyberboss] ambiguous proactive target: multiple users have context tokens (${tokenUsers.join(", ")})`
+    );
+    return "";
+  }
+
+  console.warn("[cyberboss] no proactive target with valid context token");
   return "";
 }
 
