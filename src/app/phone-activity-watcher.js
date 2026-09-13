@@ -5,6 +5,7 @@ const { resolvePreferredSenderId, resolvePreferredWorkspaceRoot } = require("../
 const { SystemMessageQueueStore } = require("../core/system-message-queue-store");
 const { VegliaActivitySource, DEFAULT_APP_LABELS } = require("../adapters/veglia/client");
 const { PhoneWatchStateStore } = require("../core/phone-watch-state-store");
+const { PersistentRuleScheduler } = require("./persistent-rule-scheduler");
 
 const DEFAULT_INTERVAL_MS = 5 * 60_000;
 const DEFAULT_TRIGGER_AFTER_MS = 10 * 60_000;
@@ -39,11 +40,28 @@ class PhoneActivityWatcher {
     this.account = options.account || (options.config ? resolveSelectedAccount(this.config) : null);
     this.sessionStore = options.sessionStore || (options.config?.sessionsFile ? new SessionStore({ filePath: this.config.sessionsFile }) : null);
     this.target = options.target || (this.account && this.sessionStore ? resolvePollerTarget({ config: this.config, account: this.account, sessionStore: this.sessionStore }) : null);
+    this.ruleScheduler = options.ruleScheduler || (this.config?.persistentRulesFile ? new PersistentRuleScheduler({
+      config: this.config,
+      sessionStore: this.sessionStore,
+    }) : null);
   }
 
   evaluateSample(sampleData, nowMs = this.clock()) {
     const isoNow = new Date(nowMs).toISOString();
     const currentState = this.stateStore.getState();
+
+    if (this.ruleScheduler && typeof this.ruleScheduler.evaluateWakeActivity === "function") {
+      try {
+        this.ruleScheduler.evaluateWakeActivity({
+          sample: sampleData,
+          watcherState: currentState,
+          account: this.account,
+          nowMs,
+        });
+      } catch (error) {
+        console.warn(`[phone-watch] wake rule evaluation failed: ${error.message}`);
+      }
+    }
 
     // 1. Record sample timestamp
     const nextState = {
@@ -391,8 +409,8 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function runPhoneActivityWatcher(config) {
-  const watcher = new PhoneActivityWatcher({ config });
+async function runPhoneActivityWatcher(config, options = {}) {
+  const watcher = new PhoneActivityWatcher({ config, ...options });
   console.log(`[phone-watch] ready user=${watcher.target.senderId} workspace=${watcher.target.workspaceRoot}`);
   console.log(`[phone-watch] interval=${Math.round(watcher.intervalMs / 60_000)}m triggerAfter=${Math.round(watcher.triggerAfterMs / 60_000)}m cooldown=${Math.round(watcher.triggerCooldownMs / 60_000)}m`);
 

@@ -39,10 +39,22 @@ class SystemMessageQueueStore {
     if (!normalized) {
       throw new Error("invalid system message");
     }
-    this.state.messages.push(normalized);
+    const existingIndex = this.state.messages.findIndex((item) => item.id === normalized.id);
+    if (existingIndex >= 0) {
+      this.state.messages[existingIndex] = normalized;
+    } else {
+      this.state.messages.push(normalized);
+    }
     this.state.messages.sort(compareSystemMessages);
     this.save();
     return normalized;
+  }
+
+  has(id) {
+    this.load();
+    const normalizedId = typeof id === "string" ? id.trim() : "";
+    if (!normalizedId) return false;
+    return this.state.messages.some((item) => item.id === normalizedId);
   }
 
   drainDueForAccount(accountId, now = Date.now()) {

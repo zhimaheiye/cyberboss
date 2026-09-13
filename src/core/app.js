@@ -43,6 +43,8 @@ const {
 } = require("../adapters/runtime/shared/approval-command");
 const { runSystemCheckinPoller } = require("../app/system-checkin-poller");
 const { runPhoneActivityWatcher } = require("../app/phone-activity-watcher");
+const { PersistentRuleStore } = require("./persistent-rule-store");
+const { PersistentRuleScheduler } = require("../app/persistent-rule-scheduler");
 const { createProjectTooling } = require("../tools/create-project-tooling");
 const DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000;
 const MIN_LONG_POLL_TIMEOUT_MS = 2_000;
@@ -95,6 +97,14 @@ class CyberbossApp {
     this.checkinConfigStore = new CheckinConfigStore({ filePath: config.checkinConfigFile });
     this.timelineScreenshotQueue = new TimelineScreenshotQueueStore({ filePath: config.timelineScreenshotQueueFile });
     this.reminderQueue = new ReminderQueueStore({ filePath: config.reminderQueueFile });
+    this.persistentRuleStore = new PersistentRuleStore({ filePath: config.persistentRulesFile });
+    this.persistentRuleScheduler = new PersistentRuleScheduler({
+      config: this.config,
+      ruleStore: this.persistentRuleStore,
+      reminderQueue: this.reminderQueue,
+      systemMessageQueue: this.systemMessageQueue,
+      sessionStore: this.runtimeAdapter.getSessionStore(),
+    });
     this.turnGateStore = new TurnGateStore();
     this.pendingInboundByScope = new Map();
     this.pendingImageInboundByScope = new Map();
@@ -175,7 +185,9 @@ class CyberbossApp {
     }
     if (this.config.phoneWatchEnabled) {
       console.log("[cyberboss] phone-watch: enabled");
-      void runPhoneActivityWatcher(this.config).catch((error) => {
+      void runPhoneActivityWatcher(this.config, {
+        ruleScheduler: this.persistentRuleScheduler,
+      }).catch((error) => {
         console.error(`[phone-watch] watcher stopped: ${error.message}`);
       });
     }
@@ -995,6 +1007,14 @@ class CyberbossApp {
   }
 
   async flushDueReminders(account) {
+    if (this.persistentRuleScheduler && typeof this.persistentRuleScheduler.evaluateDailyRules === "function") {
+      try {
+        this.persistentRuleScheduler.evaluateDailyRules({ account, nowMs: Date.now() });
+      } catch (error) {
+        console.warn(`[cyberboss] daily rule evaluation failed: ${error.message}`);
+      }
+    }
+
     const dueReminders = this.reminderQueue
       .listDue(Date.now())
       .filter((reminder) => reminder.accountId === account.accountId);

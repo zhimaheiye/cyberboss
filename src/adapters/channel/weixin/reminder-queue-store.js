@@ -39,10 +39,29 @@ class ReminderQueueStore {
     if (!normalized) {
       throw new Error("invalid reminder");
     }
-    this.state.reminders.push(normalized);
+    const existingIndex = this.state.reminders.findIndex((item) => item.id === normalized.id);
+    if (existingIndex >= 0) {
+      this.state.reminders[existingIndex] = normalized;
+    } else {
+      this.state.reminders.push(normalized);
+    }
     this.state.reminders.sort((left, right) => left.dueAtMs - right.dueAtMs);
     this.save();
     return normalized;
+  }
+
+  has(id) {
+    this.load();
+    const normalizedId = typeof id === "string" ? id.trim() : "";
+    if (!normalizedId) return false;
+    return this.state.reminders.some((item) => item.id === normalizedId);
+  }
+
+  find(id) {
+    this.load();
+    const normalizedId = typeof id === "string" ? id.trim() : "";
+    if (!normalizedId) return null;
+    return this.state.reminders.find((item) => item.id === normalizedId) || null;
   }
 
   listDue(nowMs = Date.now()) {
