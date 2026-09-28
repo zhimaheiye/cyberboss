@@ -78,6 +78,12 @@ function readConfig() {
     claudePermissionMode: readTextEnv("CYBERBOSS_CLAUDE_PERMISSION_MODE") || "default",
     claudeDisableVerbose: readBoolEnv("CYBERBOSS_CLAUDE_DISABLE_VERBOSE"),
     claudeExtraArgs: readListEnv("CYBERBOSS_CLAUDE_EXTRA_ARGS"),
+    grokBotWebhookUrl: readTextEnv("GROKBOT_WEBHOOK_URL"),
+    grokBotWebhookKey: readTextEnv("GROKBOT_WEBHOOK_KEY"),
+    grokBotWebhookTimeoutMs: readIntEnv("GROKBOT_WEBHOOK_TIMEOUT_MS") || 120_000,
+    grokBotDryRun: readBoolEnv("GROKBOT_DRY_RUN"),
+    grokBotBridgeMode: readTextEnv("GROKBOT_BRIDGE_MODE") || "sync",
+    assistantNickname: readTextEnv("CYBERBOSS_ASSISTANT_NICKNAME") || "小宝",
     sessionsFile: path.join(stateDir, "sessions.json"),
     startWithCheckin: (mode === "start" && hasArgFlag(argv, "--checkin")) || readBoolEnv("CYBERBOSS_ENABLE_CHECKIN"),
   };

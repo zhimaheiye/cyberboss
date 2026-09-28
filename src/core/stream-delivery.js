@@ -717,8 +717,25 @@ function sanitizeReplyText(plainReplyText) {
   if (!normalized) {
     return "";
   }
+  // Drop provider/quota failures so they never leak to WeChat as chat text.
+  if (looksLikeProviderApiError(normalized)) {
+    return "";
+  }
   const protocolSanitized = sanitizeProtocolLeakText(normalized);
   return trimOuterBlankLines(protocolSanitized.text || "");
+}
+
+function looksLikeProviderApiError(text) {
+  const normalized = String(text || "").trim();
+  if (!normalized) {
+    return false;
+  }
+  return /^(?:API Error|Error|HTTP)\b/i.test(normalized)
+    || /\bRequest rejected\s*\(\s*429\s*\)/i.test(normalized)
+    || /\bYou exceeded your current quota\b/i.test(normalized)
+    || /\bNo active API keys?\b/i.test(normalized)
+    || /\bcloudflare-5xx-errors\b/i.test(normalized)
+    || /\bError 524\b/i.test(normalized);
 }
 
 function resolveSystemReplyDelivery(replyText, policy = createSystemReplyPolicy("")) {
@@ -728,8 +745,9 @@ function resolveSystemReplyDelivery(replyText, policy = createSystemReplyPolicy(
   }
 
   const source = normalizeSystemReplySource(normalized);
-  if (source.requiresStructuredAction || source.text.startsWith("{")) {
-    return resolveSystemReplyAction(source.text);
+  const actionCandidate = extractSystemActionJsonCandidate(source.text);
+  if (source.requiresStructuredAction || source.text.startsWith("{") || actionCandidate) {
+    return resolveSystemReplyAction(actionCandidate || source.text);
   }
 
   if (!policy.allowPlainTextSendMessage) {
@@ -834,7 +852,7 @@ function createSystemReplyPolicy(runtimeId) {
    */
   return {
     runtimeId: normalizedRuntimeId,
-    allowPlainTextSendMessage: normalizedRuntimeId === "claudecode",
+    allowPlainTextSendMessage: normalizedRuntimeId === "claudecode" || normalizedRuntimeId === "grokbot",
     maxPlainTextLength: 280,
     maxPlainTextLines: 3,
   };
@@ -851,14 +869,12 @@ function classifyReplyItemSourceText(replyText) {
   if (!candidate) {
     return null;
   }
-  if (candidate !== stripped) {
-    return null;
-  }
   return resolveSystemReplyAction(candidate);
 }
 
 function unwrapJsonCodeFence(text) {
-  const match = String(text || "").trim().match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  // Allow trailing junk after the closing fence (token footers, stray brackets, etc.).
+  const match = String(text || "").trim().match(/^```(?:json)?\s*([\s\S]*?)\s*```/i);
   return match ? String(match[1] || "").trim() : "";
 }
 
@@ -904,7 +920,7 @@ function normalizeRuntimeId(value) {
   return String(value || "").trim().toLowerCase();
 }
 
-function tryParseJson(value) {
+function parseJsonStrict(value) {
   try {
     return JSON.parse(value);
   } catch {
@@ -912,20 +928,71 @@ function tryParseJson(value) {
   }
 }
 
-function extractSystemActionJsonCandidate(text) {
-  const normalized = normalizeLineEndings(String(text || "")).trim();
-  if (!normalized || !normalized.endsWith("}")) {
+function tryParseJson(value) {
+  const direct = parseJsonStrict(value);
+  if (direct !== null) {
+    return direct;
+  }
+  const salvaged = extractSystemActionJsonCandidate(value);
+  if (!salvaged) {
+    return null;
+  }
+  return parseJsonStrict(salvaged);
+}
+
+function extractBalancedJsonObjectAt(text, startIndex) {
+  if (startIndex < 0 || startIndex >= text.length || text[startIndex] !== "{") {
     return "";
   }
-  if (normalized.startsWith("{")) {
-    return normalized;
-  }
-  for (let index = normalized.lastIndexOf("{"); index >= 0; index = normalized.lastIndexOf("{", index - 1)) {
-    const candidate = normalized.slice(index).trim();
-    if (!candidate.startsWith("{") || !candidate.endsWith("}")) {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = startIndex; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (ch === "\"") {
+        inString = false;
+      }
       continue;
     }
-    const parsed = tryParseJson(candidate);
+    if (ch === "\"") {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") {
+      depth += 1;
+      continue;
+    }
+    if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return text.slice(startIndex, i + 1);
+      }
+    }
+  }
+  return "";
+}
+
+function extractSystemActionJsonCandidate(text) {
+  const normalized = normalizeLineEndings(String(text || "")).trim();
+  if (!normalized || !normalized.includes("{")) {
+    return "";
+  }
+
+  for (let index = normalized.indexOf("{"); index >= 0; index = normalized.indexOf("{", index + 1)) {
+    const candidate = extractBalancedJsonObjectAt(normalized, index);
+    if (!candidate) {
+      continue;
+    }
+    const parsed = parseJsonStrict(candidate);
     if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
       continue;
     }
@@ -954,4 +1021,10 @@ function normalizeNumericErrorCode(value) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
-module.exports = { StreamDelivery };
+module.exports = {
+  StreamDelivery,
+  resolveSystemReplyDelivery,
+  tryParseJson,
+  extractSystemActionJsonCandidate,
+  parseJsonStrict,
+};
