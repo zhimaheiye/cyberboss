@@ -446,6 +446,7 @@ ${HOME}/.cyberboss
 ### 常用项目工具
 
 - `cyberboss_reminder_create`
+- `cyberboss_internal_reminder_create`
 - `cyberboss_diary_append`
 - `cyberboss_timeline_write`
 - `cyberboss_timeline_build`

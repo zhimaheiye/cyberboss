@@ -283,6 +283,9 @@ class StreamDelivery {
 
   async flushNow(state, { force }) {
     if (!state.replyTarget) {
+      console.warn(
+        `[cyberboss] reply delivery skipped: missing reply target thread=${state.threadId} turn=${state.turnId || "(unknown)"}`
+      );
       return;
     }
 
@@ -324,8 +327,23 @@ class StreamDelivery {
 
     const replyText = buildReplyText(state, { completedOnly: false });
     const resolved = resolveSystemReplyDelivery(replyText, this.systemReplyPolicy);
+    const isDeliveryRequiredReminder = state.replyTarget?.source === "reminder" && Boolean(state.replyTarget?.deliveryRequired);
+    const fallbackText = state.replyTarget?.fallbackText || "";
+
     if (resolved.kind === "silent") {
       this.markAllItemsSent(state);
+      if (isDeliveryRequiredReminder && fallbackText) {
+        console.warn(
+          `[cyberboss] reminder delivery fallback triggered for thread=${state.threadId} (model returned silent)`
+        );
+        state.sendChain = state.sendChain.then(async () => {
+          await this.sendSystemReply(state, fallbackText);
+        }).catch((error) => {
+          console.error(`[cyberboss] failed to deliver fallback reminder thread=${state.threadId}: ${error.message}`);
+        });
+        await state.sendChain;
+        return;
+      }
       console.log(
         `[cyberboss] suppressed system reply thread=${state.threadId} action=silent preview=${JSON.stringify(replyText.slice(0, 120))}`
       );
@@ -336,6 +354,18 @@ class StreamDelivery {
       console.error(
         `[cyberboss] invalid system reply thread=${state.threadId} reason=${resolved.reason} preview=${JSON.stringify(replyText.slice(0, 160))}`
       );
+      this.markAllItemsSent(state);
+      if (isDeliveryRequiredReminder && fallbackText) {
+        console.warn(
+          `[cyberboss] reminder delivery fallback triggered for thread=${state.threadId} (model returned non-send_message: ${resolved.reason})`
+        );
+        state.sendChain = state.sendChain.then(async () => {
+          await this.sendSystemReply(state, fallbackText);
+        }).catch((error) => {
+          console.error(`[cyberboss] failed to deliver fallback reminder thread=${state.threadId}: ${error.message}`);
+        });
+        await state.sendChain;
+      }
       return;
     }
 
@@ -388,7 +418,21 @@ class StreamDelivery {
       text,
       contextToken: initialTarget.contextToken,
     };
-    await this.sendTextWithRetry(state, payload, { kind: "system_reply" });
+    const source = initialTarget.source || "system";
+    console.log(
+      `[cyberboss] proactive send attempt source=${source} thread=${state.threadId} user=${initialTarget.userId}`
+    );
+    try {
+      await this.sendTextWithRetry(state, payload, { kind: "system_reply" });
+      console.log(
+        `[cyberboss] proactive send success source=${source} thread=${state.threadId} user=${initialTarget.userId}`
+      );
+    } catch (error) {
+      console.error(
+        `[cyberboss] proactive send failed source=${source} thread=${state.threadId} user=${initialTarget.userId} error=${error.message}`
+      );
+      throw error;
+    }
   }
 
   async sendTextWithRetry(state, payload, { kind }) {
@@ -533,11 +577,8 @@ class StreamDelivery {
   }
 
   applyThreadReplyTarget(state, target) {
-    state.replyTarget = {
-      userId: target.userId,
-      contextToken: target.contextToken,
-      provider: target.provider,
-    };
+    const normalized = normalizeReplyTarget(target);
+    state.replyTarget = normalized ? { ...normalized } : null;
     state.threadReplyTargetAttached = true;
   }
 
@@ -695,11 +736,21 @@ function normalizeReplyTarget(target) {
   if (!target?.userId || !target?.contextToken) {
     return null;
   }
-  return {
+  const normalized = {
     userId: String(target.userId).trim(),
     contextToken: String(target.contextToken).trim(),
     provider: normalizeText(target.provider),
   };
+  if (target.source) {
+    normalized.source = normalizeText(target.source);
+  }
+  if (typeof target.deliveryRequired === "boolean") {
+    normalized.deliveryRequired = target.deliveryRequired;
+  }
+  if (target.fallbackText) {
+    normalized.fallbackText = String(target.fallbackText).trim();
+  }
+  return normalized;
 }
 
 function normalizeLineEndings(value) {

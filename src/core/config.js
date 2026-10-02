@@ -26,6 +26,7 @@ function readConfig() {
     weixinQrBotType: readTextEnv("CYBERBOSS_WEIXIN_QR_BOT_TYPE") || "3",
     accountsDir: path.join(stateDir, "accounts"),
     reminderQueueFile: path.join(stateDir, "reminder-queue.json"),
+    persistentRulesFile: readTextEnv("CYBERBOSS_PERSISTENT_RULES_FILE") || path.join(stateDir, "persistent-rules.json"),
     systemMessageQueueFile: path.join(stateDir, "system-message-queue.json"),
     deferredSystemReplyQueueFile: path.join(stateDir, "deferred-system-replies.json"),
     checkinConfigFile: path.join(stateDir, "checkin-config.json"),
@@ -84,8 +85,42 @@ function readConfig() {
     grokBotDryRun: readBoolEnv("GROKBOT_DRY_RUN"),
     grokBotBridgeMode: readTextEnv("GROKBOT_BRIDGE_MODE") || "sync",
     assistantNickname: readTextEnv("CYBERBOSS_ASSISTANT_NICKNAME") || "小宝",
+    antigravityCommand: readTextEnv("CYBERBOSS_ANTIGRAVITY_COMMAND") || "antigravity",
+    antigravityModel: readTextEnv("CYBERBOSS_ANTIGRAVITY_MODEL") || "",
+    antigravityEffort: readTextEnv("CYBERBOSS_ANTIGRAVITY_EFFORT") || "",
+    antigravityExtraArgs: readListEnv("CYBERBOSS_ANTIGRAVITY_EXTRA_ARGS"),
+    antigravityTimeoutMs: readIntEnv("CYBERBOSS_ANTIGRAVITY_TIMEOUT_MS") || 120_000,
+    antigravityHttpProxy: readTextEnv("CYBERBOSS_ANTIGRAVITY_HTTP_PROXY"),
+    antigravityHttpsProxy: readTextEnv("CYBERBOSS_ANTIGRAVITY_HTTPS_PROXY"),
+    antigravityNoProxy:
+      readTextEnv("CYBERBOSS_ANTIGRAVITY_NO_PROXY") ||
+      (readTextEnv("CYBERBOSS_ANTIGRAVITY_HTTP_PROXY") || readTextEnv("CYBERBOSS_ANTIGRAVITY_HTTPS_PROXY")
+        ? "localhost,127.0.0.1,::1"
+        : ""),
     sessionsFile: path.join(stateDir, "sessions.json"),
+    opsDir: path.join(stateDir, "ops"),
+    runtimeHealthFile: path.join(stateDir, "ops", "runtime-health.json"),
+    incidentsDir: path.join(stateDir, "ops", "incidents"),
+    antigravityStreamRetryMax: readIntEnv("CYBERBOSS_ANTIGRAVITY_STREAM_RETRY_MAX") ?? 1,
+    antigravityStreamRetryDelayMs: readIntEnv("CYBERBOSS_ANTIGRAVITY_STREAM_RETRY_DELAY_MS") ?? 2500,
+    runtimeFailureIncidentThreshold: readIntEnv("CYBERBOSS_RUNTIME_FAILURE_INCIDENT_THRESHOLD") ?? 3,
+    runtimeFailureWindowMs: readIntEnv("CYBERBOSS_RUNTIME_FAILURE_WINDOW_MS") ?? 900_000,
+    runtimeIncidentCooldownMs: readIntEnv("CYBERBOSS_RUNTIME_INCIDENT_COOLDOWN_MS") ?? 1_800_000,
     startWithCheckin: (mode === "start" && hasArgFlag(argv, "--checkin")) || readBoolEnv("CYBERBOSS_ENABLE_CHECKIN"),
+    phoneWatchStateFile: path.join(stateDir, "phone-watch-state.json"),
+    phoneWatchEnabled: resolvePhoneWatchEnabled({
+      mode,
+      argv,
+      enabled: readOptionalBoolEnv("CYBERBOSS_PHONE_WATCH_ENABLED"),
+    }),
+    phoneWatchIntervalMs: readIntEnv("CYBERBOSS_PHONE_WATCH_INTERVAL_MS") || 300_000,
+    phoneWatchTriggerAfterMs: readIntEnv("CYBERBOSS_PHONE_WATCH_TRIGGER_AFTER_MS") || 600_000,
+    phoneWatchTriggerCooldownMs: readIntEnv("CYBERBOSS_PHONE_WATCH_TRIGGER_COOLDOWN_MS") || 900_000,
+    phoneWatchInactiveResetMs: readIntEnv("CYBERBOSS_PHONE_WATCH_INACTIVE_RESET_MS") || 600_000,
+    phoneWatchHeartbeatStaleMs: readIntEnv("CYBERBOSS_PHONE_WATCH_HEARTBEAT_STALE_MS") || 180_000,
+    vegliaUrl: readTextEnv("CYBERBOSS_VEGLIA_URL") || "http://127.0.0.1:8513",
+    vegliaToken: readTextEnv("CYBERBOSS_VEGLIA_TOKEN"),
+    vegliaEnvFile: readTextEnv("CYBERBOSS_VEGLIA_ENV_FILE"),
   };
 }
 
@@ -175,6 +210,19 @@ function resolveLocationServerEnabled({ mode, enabled }) {
     return enabled;
   }
   return false;
+}
+
+function resolvePhoneWatchEnabled({ mode, argv, enabled }) {
+  if (enabled !== undefined) {
+    return enabled;
+  }
+  if (hasArgFlag(argv, "--phone-watch")) {
+    return true;
+  }
+  if (hasArgFlag(argv, "--no-phone-watch")) {
+    return false;
+  }
+  return mode === "start";
 }
 
 module.exports = { readConfig };

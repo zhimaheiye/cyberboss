@@ -60,7 +60,9 @@ function mapClaudeCodeMessageToRuntimeEvent(message, raw) {
         },
       };
     case "process.error":
-    case "process.close":
+      if (!message.turnId) {
+        return null;
+      }
       return {
         type: "runtime.turn.failed",
         payload: {
@@ -69,6 +71,20 @@ function mapClaudeCodeMessageToRuntimeEvent(message, raw) {
           text: message.error || "❌ Runtime process exited unexpectedly",
         },
       };
+    case "process.close":
+      if (!message.turnId) {
+        return null;
+      }
+      return {
+        type: "runtime.turn.failed",
+        payload: {
+          threadId: message.sessionId,
+          turnId: message.turnId,
+          text: message.error || "❌ Runtime process exited unexpectedly",
+        },
+      };
+    case "process.exit":
+      return null;
     case "session.id":
       return null;
     default:

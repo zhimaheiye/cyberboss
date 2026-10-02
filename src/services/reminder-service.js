@@ -29,6 +29,8 @@ class ReminderService {
     text = "",
     textFile = "",
     userId = "",
+    origin = "user",
+    deliveryRequired = undefined,
   } = {}, context = {}) {
     const body = await resolveBodyInput({ text, textFile });
     if (!body) {
@@ -58,6 +60,11 @@ class ReminderService {
       throw new Error(`Cannot find context_token for ${senderId}. Let this user talk to the bot once first.`);
     }
 
+    const normalizedOrigin = String(origin || "user").trim().toLowerCase() === "internal" ? "internal" : "user";
+    const normalizedDeliveryRequired = typeof deliveryRequired === "boolean"
+      ? deliveryRequired
+      : (normalizedOrigin !== "internal");
+
     const reminder = this.queue.enqueue({
       id: crypto.randomUUID(),
       accountId: account.accountId,
@@ -66,6 +73,8 @@ class ReminderService {
       text: body,
       dueAtMs,
       createdAt: new Date().toISOString(),
+      origin: normalizedOrigin,
+      deliveryRequired: normalizedDeliveryRequired,
     });
     return reminder;
   }

@@ -1,4 +1,6 @@
 const { spawn } = require("child_process");
+const fs = require("fs");
+const path = require("path");
 
 class ClaudeCodeProcessClient {
   constructor({ command = "claude", cwd, env, model = "", permissionMode = "default", disableVerbose = false, extraArgs = [], mcpConfigPaths = [], ipcServer = null, workspaceRoot = "" }) {
@@ -17,6 +19,8 @@ class ClaudeCodeProcessClient {
     this.stdoutBuffer = "";
     this.listeners = new Set();
     this.pendingTurnId = "";
+    this.activeTurnCompleted = false;
+    this.lastCompletedTurnId = "";
     this.sessionId = "";
     this.resumeSessionId = "";
     this.activeThreadId = "";
@@ -49,6 +53,9 @@ class ClaudeCodeProcessClient {
     this.sessionId = "";
     this.resumeSessionId = isValidSessionId(resumeSessionId) ? resumeSessionId : "";
     this.activeThreadId = "";
+    this.pendingTurnId = "";
+    this.activeTurnCompleted = false;
+    this.stdoutBuffer = "";
     const args = buildArgs({
       model: this.model,
       permissionMode: this.permissionMode,
@@ -63,12 +70,46 @@ class ClaudeCodeProcessClient {
     console.log(
       `[claudecode-runtime] launching command=${this.command} cwd=${this.cwd} mcp_config=${mcpLabel}`
     );
-    const child = spawn(this.command, args, {
-      cwd: this.cwd,
-      env: this.env,
-      stdio: ["pipe", "pipe", "pipe"],
-      shell: false,
-    });
+
+    let spawnTarget;
+    try {
+      spawnTarget = prepareClaudeSpawn({
+        command: this.command,
+        args,
+        env: this.env,
+      });
+    } catch (err) {
+      this.rejectSessionWaiters(err);
+      this.emit({
+        type: "process.error",
+        error: err.message,
+        sessionId: this.activeThreadId || this.sessionId,
+        turnId: this.pendingTurnId,
+      }, null);
+      throw err;
+    }
+
+    const { spawnCommand, spawnArgs, spawnOptions } = spawnTarget;
+
+    let child;
+    try {
+      child = spawn(spawnCommand, spawnArgs, {
+        cwd: this.cwd,
+        env: this.env,
+        stdio: ["pipe", "pipe", "pipe"],
+        ...spawnOptions,
+      });
+    } catch (err) {
+      this.rejectSessionWaiters(err);
+      this.emit({
+        type: "process.error",
+        error: err.message,
+        sessionId: this.activeThreadId || this.sessionId,
+        turnId: this.pendingTurnId,
+      }, null);
+      throw err;
+    }
+
     this.child = child;
     this.stdin = child.stdin;
     this.alive = true;
@@ -97,10 +138,24 @@ class ClaudeCodeProcessClient {
       this.alive = false;
       this.child = null;
       this.stdin = null;
-      this.emit({ type: "process.error", error: err.message, sessionId: this.activeThreadId || this.sessionId, turnId: this.pendingTurnId }, null);
+      const targetSessionId = this.activeThreadId || this.sessionId;
+      const turnId = this.pendingTurnId;
+      this.pendingTurnId = "";
+      this.activeThreadId = "";
+      this.emit({
+        type: "process.error",
+        error: err.message,
+        sessionId: targetSessionId,
+        turnId,
+      }, null);
     });
 
     child.on("close", (code) => {
+      if (this.stdoutBuffer && this.stdoutBuffer.trim()) {
+        const remaining = this.stdoutBuffer.trim();
+        this.stdoutBuffer = "";
+        this.handleLine(remaining);
+      }
       this.rejectSessionWaiters(new Error(`claudecode process closed with code ${code ?? "unknown"}`));
       this.alive = false;
       this.child = null;
@@ -109,7 +164,38 @@ class ClaudeCodeProcessClient {
         this.suppressNextCloseEvent = false;
         return;
       }
-      this.emit({ type: "process.close", code, sessionId: this.activeThreadId || this.sessionId, turnId: this.pendingTurnId }, null);
+
+      const hadPendingTurn = Boolean(this.pendingTurnId && !this.activeTurnCompleted);
+      const pendingTurnId = this.pendingTurnId;
+      const targetSessionId = this.activeThreadId || this.sessionId;
+
+      this.pendingTurnId = "";
+      this.activeThreadId = "";
+
+      if (hadPendingTurn) {
+        this.emit({
+          type: "process.close",
+          code,
+          sessionId: targetSessionId,
+          turnId: pendingTurnId,
+        }, null);
+      } else {
+        if (code !== 0 && code !== null) {
+          console.warn(
+            `[claudecode-runtime] process exited with code ${code} after turn completion or while idle`
+          );
+        } else {
+          console.log(
+            `[claudecode-runtime] process exited normally (code=${code ?? 0}) after turn completion or while idle`
+          );
+        }
+        this.emit({
+          type: "process.exit",
+          code,
+          sessionId: targetSessionId,
+          lastCompletedTurnId: this.lastCompletedTurnId,
+        }, null);
+      }
     });
   }
 
@@ -217,10 +303,14 @@ class ClaudeCodeProcessClient {
         return;
       }
     }
+    const completedTurnId = this.pendingTurnId;
+    this.lastCompletedTurnId = completedTurnId;
+    this.activeTurnCompleted = true;
+    const completedSessionId = this.activeThreadId || this.sessionId;
     this.emit({
       type: "turn.completed",
-      turnId: this.pendingTurnId,
-      sessionId: this.activeThreadId || this.sessionId,
+      turnId: completedTurnId,
+      sessionId: completedSessionId,
       text: typeof raw.result === "string" ? raw.result.trim() : "",
     }, raw);
     this.pendingTurnId = "";
@@ -277,6 +367,7 @@ class ClaudeCodeProcessClient {
       throw new Error("claudecode process not running");
     }
     this.pendingTurnId = `turn-${Date.now()}`;
+    this.activeTurnCompleted = false;
     this.activeThreadId = threadId || this.sessionId;
     if (this.ipcServer) {
       this.ipcServer.broadcast({
@@ -336,6 +427,7 @@ class ClaudeCodeProcessClient {
 
   async close() {
     if (!this.child) return;
+    this.suppressNextCloseEvent = true;
     if (this.stdin && !this.stdin.destroyed) {
       this.stdin.end();
     }
@@ -366,6 +458,8 @@ class ClaudeCodeProcessClient {
     this.resumeSessionId = "";
     this.activeThreadId = "";
     this.pendingTurnId = "";
+    this.activeTurnCompleted = false;
+    this.lastCompletedTurnId = "";
     this.rejectSessionWaiters(new Error("claudecode process closed"));
   }
 
@@ -441,4 +535,164 @@ function isPotentiallySensitive(text) {
   return SENSITIVE_KEYWORDS.test(text) || SENSITIVE_PATTERNS.test(text);
 }
 
-module.exports = { ClaudeCodeProcessClient };
+function isBatchScript(filePath) {
+  if (typeof filePath !== "string") return false;
+  const ext = path.extname(filePath).toLowerCase();
+  return ext === ".cmd" || ext === ".bat";
+}
+
+function isExecutable(filePath) {
+  if (typeof filePath !== "string") return false;
+  const ext = path.extname(filePath).toLowerCase();
+  return ext === ".exe" || ext === ".com";
+}
+
+function resolveWindowsCommand(command, env = process.env) {
+  const trimmed = typeof command === "string" ? command.trim() : "";
+  if (!trimmed) {
+    throw new Error("Claude Code command is not specified");
+  }
+
+  const rawPathext = (env && typeof env.PATHEXT === "string") ? env.PATHEXT : (process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD");
+  const pathextList = rawPathext.split(";").map((ext) => ext.trim()).filter(Boolean);
+
+  // If command contains path separators, resolve directly
+  if (trimmed.includes("\\") || trimmed.includes("/")) {
+    if (fs.existsSync(trimmed)) {
+      const resolved = path.resolve(trimmed);
+      return {
+        resolvedPath: resolved,
+        isBatch: isBatchScript(resolved),
+        isExe: isExecutable(resolved),
+      };
+    }
+
+    for (const ext of pathextList) {
+      const candidate = `${trimmed}${ext}`;
+      if (fs.existsSync(candidate)) {
+        const resolved = path.resolve(candidate);
+        return {
+          resolvedPath: resolved,
+          isBatch: isBatchScript(resolved),
+          isExe: isExecutable(resolved),
+        };
+      }
+    }
+
+    throw new Error(`Claude Code command not found: ${trimmed}`);
+  }
+
+  // Bare command name: search PATH
+  const rawPath = (env && typeof env.PATH === "string") ? env.PATH : (process.env.PATH || "");
+  const pathDirs = rawPath
+    .split(";")
+    .map((dir) => dir.trim().replace(/^"(.*)"$/, "$1"))
+    .filter(Boolean);
+
+  const hasExt = Boolean(path.extname(trimmed));
+
+  for (const dir of pathDirs) {
+    if (hasExt) {
+      const candidate = path.join(dir, trimmed);
+      if (fs.existsSync(candidate)) {
+        const resolved = path.resolve(candidate);
+        return {
+          resolvedPath: resolved,
+          isBatch: isBatchScript(resolved),
+          isExe: isExecutable(resolved),
+        };
+      }
+    } else {
+      for (const ext of pathextList) {
+        const candidate = path.join(dir, `${trimmed}${ext}`);
+        if (fs.existsSync(candidate)) {
+          const resolved = path.resolve(candidate);
+          return {
+            resolvedPath: resolved,
+            isBatch: isBatchScript(resolved),
+            isExe: isExecutable(resolved),
+          };
+        }
+      }
+      const exactCandidate = path.join(dir, trimmed);
+      if (fs.existsSync(exactCandidate)) {
+        const resolved = path.resolve(exactCandidate);
+        return {
+          resolvedPath: resolved,
+          isBatch: isBatchScript(resolved),
+          isExe: isExecutable(resolved),
+        };
+      }
+    }
+  }
+
+  throw new Error(`Claude Code command not found: ${trimmed}`);
+}
+
+function resolveClaudeCommand({ command, env = process.env, platform = process.platform } = {}) {
+  const trimmed = typeof command === "string" ? command.trim() : "";
+  if (!trimmed) {
+    throw new Error("Claude Code command is not specified");
+  }
+
+  if (platform !== "win32") {
+    return {
+      resolvedPath: trimmed,
+      isBatch: false,
+      isExe: false,
+    };
+  }
+
+  return resolveWindowsCommand(trimmed, env);
+}
+
+function quoteCmdArg(arg) {
+  const str = String(arg ?? "");
+  if (!str) {
+    return '""';
+  }
+  if (!/[\s"]/.test(str)) {
+    return str;
+  }
+  let escaped = str.replace(/(\\*)"/g, '$1$1\\"');
+  escaped = escaped.replace(/(\\+)$/g, '$1$1');
+  return `"${escaped}"`;
+}
+
+function prepareClaudeSpawn({ command, args = [], env = process.env, platform = process.platform } = {}) {
+  const resolved = resolveClaudeCommand({ command, env, platform });
+
+  if (platform !== "win32" || !resolved.isBatch) {
+    return {
+      spawnCommand: resolved.resolvedPath,
+      spawnArgs: Array.isArray(args) ? [...args] : [],
+      spawnOptions: { shell: false },
+      resolved,
+    };
+  }
+
+  const comspec = (env && typeof env.ComSpec === "string" && env.ComSpec.trim())
+    || (process.env.ComSpec && process.env.ComSpec.trim())
+    || "cmd.exe";
+
+  const safeArgs = Array.isArray(args) ? args : [];
+  const innerCommandLine = [quoteCmdArg(resolved.resolvedPath), ...safeArgs.map(quoteCmdArg)].join(" ");
+  const fullCommandLine = `"${innerCommandLine}"`;
+
+  return {
+    spawnCommand: comspec,
+    spawnArgs: ["/d", "/s", "/c", fullCommandLine],
+    spawnOptions: {
+      windowsVerbatimArguments: true,
+      shell: false,
+    },
+    resolved,
+  };
+}
+
+module.exports = {
+  ClaudeCodeProcessClient,
+  resolveClaudeCommand,
+  prepareClaudeSpawn,
+  quoteCmdArg,
+};

@@ -313,6 +313,9 @@ test("completed turns flush queued inbound work before system messages", async (
       releaseThread() {
         calls.push("releaseThread");
       },
+      releaseScope() {
+        calls.push("releaseScope");
+      },
       isPending() {
         return false;
       },
@@ -340,7 +343,7 @@ test("completed turns flush queued inbound work before system messages", async (
     payload: { threadId: "thread-1", turnId: "turn-1" },
   });
 
-  assert.deepEqual(calls, ["releaseThread", "flushInbound:ignoreBoundary", "flushSystem", "stopTyping"]);
+  assert.deepEqual(calls, ["releaseThread", "releaseScope", "flushInbound:ignoreBoundary", "flushSystem", "stopTyping"]);
 });
 
 test("completed turns keep the boundary closed until queued inbound work has been flushed", async () => {
@@ -365,6 +368,9 @@ test("completed turns keep the boundary closed until queued inbound work has bee
     turnGateStore: {
       releaseThread() {
         calls.push("releaseThread");
+      },
+      releaseScope() {
+        calls.push("releaseScope");
       },
       isPending() {
         return false;
@@ -392,7 +398,7 @@ test("completed turns keep the boundary closed until queued inbound work has bee
     payload: { threadId: "thread-1", turnId: "turn-1" },
   });
 
-  assert.deepEqual(calls, ["releaseThread", "flushInbound:ignoreBoundary", "flushSystem"]);
+  assert.deepEqual(calls, ["releaseThread", "releaseScope", "flushInbound:ignoreBoundary", "flushSystem"]);
   assert.equal(appLike.turnBoundaryScopeKeys.has("binding-1::/workspace"), false);
 });
 
@@ -623,3 +629,183 @@ test("flushPendingInboundMessages falls back to messageId ordering when received
   assert.equal(dispatched[0].prepared.contextToken, "ctx-200");
   assert.match(dispatched[0].prepared.text, /第一条[\s\S]*第二条[\s\S]*第三条/);
 });
+
+// ──────────────────────────────────────────────────────────────────────────────
+// AGY terminal-event timing race regression tests
+//
+// These tests replicate the race where the Antigravity CLI emits its result
+// event synchronously during process.on("close"), which means
+// runtime.turn.completed reaches handleRuntimeEvent *before* sendTurn()
+// resolves and dispatchPreparedTurn calls attachThread().
+//
+// Before the fix:  releaseThread() found no scopeByThreadId entry → returned
+//                  without clearing pendingScopeKeys → subsequent messages were
+//                  buffered forever.
+// After the fix:   handleRuntimeEvent calls releaseScope() as a fallback when
+//                  the binding is already known from SessionStore.
+// ──────────────────────────────────────────────────────────────────────────────
+
+test("AGY race: terminal event before attachThread — TurnGateStore.releaseScope clears the pending scope", () => {
+  const gate = new TurnGateStore();
+
+  // Step 1: begin() — turn dispatched
+  const scopeKey = gate.begin("binding-1", "/workspace");
+  assert.equal(gate.isPending("binding-1", "/workspace"), true);
+
+  // Step 2: runtime.turn.completed fires before sendTurn() resolves.
+  // attachThread() has NOT been called yet.
+  // releaseThread() finds nothing and returns without clearing the scope.
+  gate.releaseThread("thread-abc");   // no-op — scopeByThreadId is empty
+  assert.equal(gate.isPending("binding-1", "/workspace"), true, "releaseThread alone does not clear scope before attachThread");
+
+  // Step 3: fallback releaseScope (what app.js now does after the fix)
+  gate.releaseScope("binding-1", "/workspace");
+  assert.equal(gate.isPending("binding-1", "/workspace"), false, "releaseScope clears the pending scope");
+
+  // Step 4: sendTurn() eventually resolves — dispatchPreparedTurn calls attachThread.
+  // attachThread must be a no-op because the scope is no longer pending.
+  gate.attachThread(scopeKey, "thread-abc");
+
+  // Verify: no stale scopeByThreadId entry was created
+  gate.releaseThread("thread-abc");   // should not corrupt any other scope
+  assert.equal(gate.isPending("binding-1", "/workspace"), false, "no stale entry after late attachThread");
+});
+
+test("AGY race: failed terminal event before attachThread — isPending is cleared", () => {
+  const gate = new TurnGateStore();
+  gate.begin("binding-2", "/ws2");
+  assert.equal(gate.isPending("binding-2", "/ws2"), true);
+
+  // Simulate failed terminal event arriving before attachThread
+  gate.releaseThread("thread-xyz");                // no-op
+  gate.releaseScope("binding-2", "/ws2");          // fallback path
+  assert.equal(gate.isPending("binding-2", "/ws2"), false);
+
+  // Late attachThread must not re-introduce a pending entry
+  gate.attachThread("binding-2::/ws2", "thread-xyz");
+  assert.equal(gate.isPending("binding-2", "/ws2"), false);
+});
+
+test("AGY race: handleRuntimeEvent releases scope via fallback when terminal event precedes attachThread", async () => {
+  // Simulate the exact production sequence:
+  // 1. turnGateStore.begin() is called
+  // 2. runtime.turn.completed fires (handleRuntimeEvent called)
+  //    → releaseThread finds nothing (attachThread not yet called)
+  //    → fallback releaseScope fires
+  // 3. sendTurn() Promise resolves → attachThread called (must be no-op)
+  // 4. Second message arrives → isPending must be false → dispatch, not buffer
+
+  const gate = new TurnGateStore();
+  const pendingScopeKey = gate.begin("binding-1", "/workspace");
+  assert.equal(gate.isPending("binding-1", "/workspace"), true);
+
+  const dispatchedTurns = [];
+
+  // Build a minimal app-like object that mirrors the production flow.
+  // SessionStore already has the threadId→binding mapping because index.js
+  // calls setThreadIdForWorkspace before emitting runtime events.
+  const appLike = {
+    turnGateStore: gate,
+    turnBoundaryScopeKeys: new Set(),
+    streamDelivery: {
+      async handleRuntimeEvent() {},
+      resolveReplyTargetForRun() { return null; },
+    },
+    runtimeAdapter: {
+      getSessionStore() {
+        return {
+          clearApprovalPrompt() {},
+          findBindingForThreadId(threadId) {
+            if (threadId === "thread-1") {
+              return { bindingKey: "binding-1", workspaceRoot: "/workspace" };
+            }
+            return null;
+          },
+        };
+      },
+    },
+    pendingOperationByRunKey: new Map(),
+    hasPendingInboundMessage() { return false; },
+    async sendFailureToThread() {},
+    async stopTypingForThread() {},
+    async flushPendingInboundMessages() {
+      // When flushing, simulate dispatching the buffered second message
+    },
+    async flushPendingSystemMessages() {},
+  };
+
+  // --- Step 2: handleRuntimeEvent called BEFORE attachThread ---
+  await CyberbossApp.prototype.handleRuntimeEvent.call(appLike, {
+    type: "runtime.turn.completed",
+    payload: { threadId: "thread-1", turnId: "turn-1", text: "ok" },
+  });
+
+  // After the event: scope must already be released
+  assert.equal(gate.isPending("binding-1", "/workspace"), false,
+    "isPending must be false immediately after terminal event (before attachThread)");
+
+  // --- Step 3: sendTurn() resolves — dispatchPreparedTurn calls attachThread ---
+  gate.attachThread(pendingScopeKey, "thread-1");
+
+  // Must still be false — attachThread must be a no-op when scope is released
+  assert.equal(gate.isPending("binding-1", "/workspace"), false,
+    "isPending must remain false after late attachThread");
+
+  // --- Step 4: Verify second message is not gated ---
+  const isTurnDispatchBlockedFn = CyberbossApp.prototype.isTurnDispatchBlocked;
+  const appLike2 = {
+    turnGateStore: gate,
+    turnBoundaryScopeKeys: new Set(),
+    runtimeAdapter: {
+      getSessionStore() {
+        return {
+          getThreadIdForWorkspace() { return null; },
+        };
+      },
+    },
+    threadStateStore: {
+      getThreadState() { return null; },
+    },
+  };
+  const blocked = isTurnDispatchBlockedFn.call(appLike2, "binding-1", "/workspace");
+  assert.equal(blocked, false,
+    "second message must not be blocked after first turn completes via fallback path");
+});
+
+test("AGY race: second consecutive message is dispatched (not buffered) after first turn", async () => {
+  // End-to-end flow: first turn completes via race path, second message dispatches.
+  const gate = new TurnGateStore();
+  gate.begin("binding-1", "/workspace");
+
+  // Simulate terminal event arriving before attachThread
+  gate.releaseThread("thread-1");       // no-op
+  gate.releaseScope("binding-1", "/workspace");  // fallback
+  gate.attachThread("binding-1::/workspace", "thread-1");  // late — must be no-op
+
+  assert.equal(gate.isPending("binding-1", "/workspace"), false,
+    "gate must be open for second message");
+
+  // Confirm scopeByThreadId has no stale entry by doing a fresh begin+attach
+  const scopeKey2 = gate.begin("binding-1", "/workspace");
+  gate.attachThread(scopeKey2, "thread-2");
+  assert.equal(gate.isPending("binding-1", "/workspace"), true,
+    "new turn can acquire the gate normally");
+  gate.releaseThread("thread-2");
+  assert.equal(gate.isPending("binding-1", "/workspace"), false,
+    "new turn releases cleanly via normal path");
+});
+
+test("normal path (attachThread before releaseThread) still works after fix", () => {
+  // Ensure the guard in attachThread does not break the common case
+  const gate = new TurnGateStore();
+  const scopeKey = gate.begin("binding-3", "/ws3");
+
+  // Normal: attachThread called while scope is still pending
+  gate.attachThread(scopeKey, "thread-3");
+  assert.equal(gate.isPending("binding-3", "/ws3"), true);
+
+  // Normal: releaseThread clears the scope
+  gate.releaseThread("thread-3");
+  assert.equal(gate.isPending("binding-3", "/ws3"), false);
+});
+

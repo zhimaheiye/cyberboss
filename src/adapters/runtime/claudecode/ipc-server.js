@@ -1,27 +1,81 @@
 const net = require("net");
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 const crypto = require("crypto");
 const { EventEmitter } = require("events");
 
+function isNamedPipeEndpoint(endpoint) {
+  if (typeof endpoint !== "string") {
+    return false;
+  }
+  return endpoint.startsWith("\\\\.\\pipe\\") || endpoint.startsWith("//./pipe/");
+}
+
+function normalizeCanonicalStateDir(stateDir) {
+  const dir = typeof stateDir === "string" && stateDir.trim()
+    ? stateDir.trim()
+    : path.join(os.homedir(), ".cyberboss");
+  let resolved = path.resolve(dir);
+  if (resolved.length > 3 && (resolved.endsWith("\\") || resolved.endsWith("/"))) {
+    resolved = resolved.slice(0, -1);
+  }
+  return resolved.toLowerCase();
+}
+
+function resolveClaudeIpcEndpoint(stateDir, platform = process.platform) {
+  const p = platform === "win32" ? path.win32 : path.posix;
+  const normalizedStateDir = typeof stateDir === "string" && stateDir.trim()
+    ? stateDir.trim()
+    : p.join(os.homedir(), ".cyberboss");
+
+  if (platform === "win32") {
+    const canonical = normalizeCanonicalStateDir(normalizedStateDir);
+    const hash = crypto.createHash("sha256").update(canonical).digest("hex").slice(0, 12);
+    return `\\\\.\\pipe\\cyberboss-claudecode-runtime-${hash}`;
+  }
+
+  return path.posix.join(normalizedStateDir.replace(/\\/g, "/"), "claudecode-runtime.sock");
+}
+
+function resolveClaudeIpcTokenPath(stateDir, platform = process.platform) {
+  const p = platform === "win32" ? path.win32 : path.posix;
+  const normalizedStateDir = typeof stateDir === "string" && stateDir.trim()
+    ? stateDir.trim()
+    : p.join(os.homedir(), ".cyberboss");
+
+  return p.join(normalizedStateDir, "claudecode-runtime.token");
+}
+
 class ClaudeCodeIpcServer extends EventEmitter {
-  constructor({ socketPath }) {
+  constructor({
+    endpoint,
+    socketPath = endpoint,
+    tokenFile,
+    stateDir,
+    platform = process.platform,
+  } = {}) {
     super();
-    this.socketPath = socketPath;
-    this.tokenFile = `${socketPath}.token`;
+    this.platform = platform;
+    const resolvedEndpoint = endpoint || socketPath || resolveClaudeIpcEndpoint(stateDir, platform);
+    this.endpoint = resolvedEndpoint;
+    this.socketPath = resolvedEndpoint;
+    this.isNamedPipe = isNamedPipeEndpoint(this.endpoint);
+    this.stateDir = stateDir || (this.isNamedPipe ? path.join(os.homedir(), ".cyberboss") : path.dirname(this.socketPath));
+    this.tokenFile = tokenFile || resolveClaudeIpcTokenPath(this.stateDir, this.platform);
     this.authToken = "";
     this.server = null;
     this.clients = new Set();
     this.authenticated = new Set();
   }
 
-  start() {
+  async start() {
     if (this.server) return;
     this.ensureDirectory();
     this.removeStaleSocket();
     this.generateAuthToken();
 
-    this.server = net.createServer((socket) => {
+    const server = net.createServer((socket) => {
       this.clients.add(socket);
       socket.setEncoding("utf8");
 
@@ -60,8 +114,47 @@ class ClaudeCodeIpcServer extends EventEmitter {
       });
     });
 
-    this.server.listen(this.socketPath, () => {
-      fs.chmodSync(this.socketPath, 0o600);
+    this.server = server;
+
+    await new Promise((resolve, reject) => {
+      let settled = false;
+
+      const onError = (err) => {
+        if (settled) return;
+        settled = true;
+        server.removeListener("listening", onListening);
+        this.removeAuthToken();
+        if (this.server === server) {
+          try {
+            server.close(() => {});
+          } catch {
+            // ignore
+          }
+          this.server = null;
+        }
+        reject(err);
+      };
+
+      const onListening = () => {
+        if (settled) return;
+        settled = true;
+        server.removeListener("error", onError);
+        server.on("error", (err) => {
+          this.emit("error", err);
+        });
+        if (!this.isNamedPipe) {
+          try {
+            fs.chmodSync(this.socketPath, 0o600);
+          } catch {
+            // ignore
+          }
+        }
+        resolve();
+      };
+
+      server.once("error", onError);
+      server.once("listening", onListening);
+      server.listen(this.socketPath);
     });
   }
 
@@ -77,11 +170,17 @@ class ClaudeCodeIpcServer extends EventEmitter {
   }
 
   ensureDirectory() {
+    if (this.isNamedPipe) {
+      return;
+    }
     const dir = path.dirname(this.socketPath);
     fs.mkdirSync(dir, { recursive: true });
   }
 
   removeStaleSocket() {
+    if (this.isNamedPipe) {
+      return;
+    }
     try {
       const stat = fs.lstatSync(this.socketPath);
       if (!stat.isSocket()) {
@@ -96,6 +195,8 @@ class ClaudeCodeIpcServer extends EventEmitter {
   generateAuthToken() {
     this.authToken = crypto.randomBytes(32).toString("hex");
     try {
+      const dir = path.dirname(this.tokenFile);
+      fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(this.tokenFile, this.authToken, { mode: 0o600 });
     } catch {
       // ignore
@@ -122,13 +223,16 @@ class ClaudeCodeIpcServer extends EventEmitter {
     this.authenticated.clear();
 
     if (this.server) {
-      await new Promise((resolve) => {
-        this.server.close(resolve);
-      });
+      const s = this.server;
       this.server = null;
+      await new Promise((resolve) => {
+        s.close(resolve);
+      });
     }
 
-    this.removeStaleSocket();
+    if (!this.isNamedPipe) {
+      this.removeStaleSocket();
+    }
     this.removeAuthToken();
   }
 }
@@ -151,4 +255,10 @@ function validateIpcMessage(msg) {
   }
 }
 
-module.exports = { ClaudeCodeIpcServer };
+module.exports = {
+  ClaudeCodeIpcServer,
+  resolveClaudeIpcEndpoint,
+  resolveClaudeIpcTokenPath,
+  isNamedPipeEndpoint,
+  validateIpcMessage,
+};

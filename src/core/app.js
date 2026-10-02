@@ -8,6 +8,7 @@ const { persistIncomingWeixinAttachments } = require("../adapters/channel/weixin
 const { createCodexRuntimeAdapter } = require("../adapters/runtime/codex");
 const { createClaudeCodeRuntimeAdapter } = require("../adapters/runtime/claudecode");
 const { createGrokBotRuntimeAdapter } = require("../adapters/runtime/grokbot");
+const { createAntigravityRuntimeAdapter } = require("../adapters/runtime/antigravity");
 const { findModelByQuery } = require("../adapters/runtime/codex/model-catalog");
 const { createTimelineIntegration } = require("../integrations/timeline");
 const {
@@ -42,6 +43,9 @@ const {
   splitCommandLine,
 } = require("../adapters/runtime/shared/approval-command");
 const { runSystemCheckinPoller } = require("../app/system-checkin-poller");
+const { runPhoneActivityWatcher } = require("../app/phone-activity-watcher");
+const { PersistentRuleStore } = require("./persistent-rule-store");
+const { PersistentRuleScheduler } = require("../app/persistent-rule-scheduler");
 const { createProjectTooling } = require("../tools/create-project-tooling");
 const DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000;
 const MIN_LONG_POLL_TIMEOUT_MS = 2_000;
@@ -53,13 +57,29 @@ const MAX_INBOUND_STICKER_IMAGE_BATCH = 10;
 const INBOUND_IMAGE_BATCH_IDLE_MS = 1_500;
 
 function createRuntimeAdapter(config) {
-  if (config.runtime === "claudecode") {
+  const runtime =
+    typeof config.runtime === "string"
+      ? config.runtime.trim().toLowerCase()
+      : "";
+
+  if (runtime === "codex") {
+    return createCodexRuntimeAdapter(config);
+  }
+
+  if (runtime === "claudecode") {
     return createClaudeCodeRuntimeAdapter(config);
   }
-  if (config.runtime === "grokbot") {
+  if (runtime === "grokbot") {
     return createGrokBotRuntimeAdapter(config);
   }
-  return createCodexRuntimeAdapter(config);
+
+  if (runtime === "antigravity") {
+    return createAntigravityRuntimeAdapter(config);
+  }
+
+  throw new Error(
+    `Unsupported CYBERBOSS_RUNTIME: ${config.runtime || "(empty)"}`
+  );
 }
 
 class CyberbossApp {
@@ -81,6 +101,14 @@ class CyberbossApp {
     this.checkinConfigStore = new CheckinConfigStore({ filePath: config.checkinConfigFile });
     this.timelineScreenshotQueue = new TimelineScreenshotQueueStore({ filePath: config.timelineScreenshotQueueFile });
     this.reminderQueue = new ReminderQueueStore({ filePath: config.reminderQueueFile });
+    this.persistentRuleStore = new PersistentRuleStore({ filePath: config.persistentRulesFile });
+    this.persistentRuleScheduler = new PersistentRuleScheduler({
+      config: this.config,
+      ruleStore: this.persistentRuleStore,
+      reminderQueue: this.reminderQueue,
+      systemMessageQueue: this.systemMessageQueue,
+      sessionStore: this.runtimeAdapter.getSessionStore(),
+    });
     this.turnGateStore = new TurnGateStore();
     this.pendingInboundByScope = new Map();
     this.pendingImageInboundByScope = new Map();
@@ -93,6 +121,7 @@ class CyberbossApp {
       onDeferredSystemReply: (payload) => this.deferSystemReply(payload),
     });
     this.pendingOperationByRunKey = new Map();
+    this.activeDispatchByScopeKey = new Map();
     this.runtimeEventChain = Promise.resolve();
     this.runtimeAdapter.onEvent((event) => {
       this.threadStateStore.applyRuntimeEvent(event);
@@ -156,6 +185,14 @@ class CyberbossApp {
       console.log("[cyberboss] checkin: enabled");
       void runSystemCheckinPoller(this.config).catch((error) => {
         console.error(`[cyberboss] checkin poller stopped: ${error.message}`);
+      });
+    }
+    if (this.config.phoneWatchEnabled) {
+      console.log("[cyberboss] phone-watch: enabled");
+      void runPhoneActivityWatcher(this.config, {
+        ruleScheduler: this.persistentRuleScheduler,
+      }).catch((error) => {
+        console.error(`[phone-watch] watcher stopped: ${error.message}`);
       });
     }
 
@@ -272,6 +309,7 @@ class CyberbossApp {
         workspaceRoot,
         text: triggerText,
         createdAt: normalizeIsoTime(point?.receivedAt) || normalizeIsoTime(point?.timestamp) || new Date().toISOString(),
+        source: "system",
       });
     }
 
@@ -283,6 +321,7 @@ class CyberbossApp {
         workspaceRoot,
         text: buildLocationMovementSystemText(movementEvent),
         createdAt: normalizeIsoTime(movementEvent?.movedAt) || new Date().toISOString(),
+        source: "system",
       });
     }
   }
@@ -430,6 +469,7 @@ class CyberbossApp {
   }
 
   async dispatchPreparedTurn({ bindingKey, workspaceRoot, prepared }) {
+    const scopeKey = buildScopeKey(bindingKey, workspaceRoot);
     const pendingScopeKey = this.turnGateStore.begin(bindingKey, workspaceRoot);
     await this.channelAdapter.sendTyping({
       userId: prepared.senderId,
@@ -437,7 +477,47 @@ class CyberbossApp {
       contextToken: prepared.contextToken,
     }).catch(() => {});
 
+    let terminalFailureEmitted = false;
+    let terminalCompletedEmitted = false;
+
+    const dispatchState = {
+      bindingKey,
+      workspaceRoot,
+      prepared,
+      terminalFailureEmitted: false,
+      terminalCompletedEmitted: false,
+    };
+    if (scopeKey && this.activeDispatchByScopeKey) {
+      this.activeDispatchByScopeKey.set(scopeKey, dispatchState);
+    }
+
+    const unsubscribe = typeof this.runtimeAdapter?.onEvent === "function"
+      ? this.runtimeAdapter.onEvent((event) => {
+          if (event?.type === "runtime.turn.failed") {
+            terminalFailureEmitted = true;
+            dispatchState.terminalFailureEmitted = true;
+          } else if (event?.type === "runtime.turn.completed") {
+            terminalCompletedEmitted = true;
+            dispatchState.terminalCompletedEmitted = true;
+          }
+        })
+      : null;
+
     try {
+      const replyTarget = {
+        userId: prepared.senderId,
+        contextToken: prepared.contextToken,
+        provider: prepared.provider,
+        ...(prepared.source ? { source: prepared.source } : {}),
+        ...(typeof prepared.deliveryRequired === "boolean" ? { deliveryRequired: prepared.deliveryRequired } : {}),
+        ...(prepared.fallbackText ? { fallbackText: prepared.fallbackText } : {}),
+      };
+      this.streamDelivery?.setReplyTarget?.(bindingKey, replyTarget);
+      const existingThreadId = this.runtimeAdapter?.getSessionStore?.()?.getThreadIdForWorkspace?.(bindingKey, workspaceRoot);
+      if (existingThreadId) {
+        this.streamDelivery?.queueReplyTargetForThread?.(existingThreadId, replyTarget);
+      }
+
       const model = this.runtimeAdapter.getSessionStore().getRuntimeParamsForWorkspace(bindingKey, workspaceRoot).model;
       const runtimeTurn = await this.buildRuntimeTurn({ prepared, model });
       const sendTurn = typeof this.runtimeAdapter.sendTurn === "function"
@@ -455,6 +535,9 @@ class CyberbossApp {
           senderId: prepared.senderId,
         },
       });
+      if (turn?.threadId) {
+        dispatchState.threadId = turn.threadId;
+      }
       this.runtimeContextStore?.setActiveContext?.({
         workspaceRoot,
         runtimeId: this.runtimeAdapter.describe().id,
@@ -464,30 +547,49 @@ class CyberbossApp {
         senderId: prepared.senderId,
       });
       this.turnGateStore.attachThread(pendingScopeKey, turn.threadId);
-      const replyTarget = {
-        userId: prepared.senderId,
-        contextToken: prepared.contextToken,
-        provider: prepared.provider,
-      };
-      if (turn.turnId) {
-        this.streamDelivery.bindReplyTargetForTurn({
+      if (turn?.turnId) {
+        this.streamDelivery?.bindReplyTargetForTurn?.({
           threadId: turn.threadId,
           turnId: turn.turnId,
           target: replyTarget,
         });
-      } else {
-        this.streamDelivery.queueReplyTargetForThread(turn.threadId, replyTarget);
+      } else if (turn?.threadId) {
+        this.streamDelivery?.queueReplyTargetForThread?.(turn.threadId, replyTarget);
       }
       return true;
     } catch (error) {
       this.turnGateStore.releaseScope(bindingKey, workspaceRoot);
       const messageText = error instanceof Error ? error.message : String(error || "unknown error");
-      await this.channelAdapter.sendText({
-        userId: prepared.senderId,
-        text: `❌ Request failed\n${messageText}`,
-        contextToken: prepared.contextToken,
-      }).catch(() => {});
+      const isSilentSource = prepared?.source === "checkin" || prepared?.source === "phone_watch";
+      if (!isSilentSource) {
+        if (!terminalFailureEmitted && !terminalCompletedEmitted) {
+          const isDeliveryRequiredReminder = prepared?.source === "reminder" && Boolean(prepared?.deliveryRequired);
+          const fallbackText = prepared?.fallbackText || prepared?.reminderText || "";
+          const textToSend = (isDeliveryRequiredReminder && fallbackText)
+            ? fallbackText
+            : `❌ Request failed\n${messageText}`;
+          await this.channelAdapter.sendText({
+            userId: prepared.senderId,
+            text: textToSend,
+            contextToken: prepared.contextToken,
+          }).catch(() => {});
+        }
+      } else {
+        const failureLabel = prepared?.source === "phone_watch" ? "phone_watch" : "checkin";
+        const checkinError = formatCheckinErrorMessage(error);
+        console.warn(`[cyberboss] ${failureLabel} runtime failed: ${checkinError}`);
+      }
       return false;
+    } finally {
+      if (typeof unsubscribe === "function") {
+        unsubscribe();
+      }
+      if (this.runtimeEventChain) {
+        await this.runtimeEventChain.catch(() => {});
+      }
+      if (scopeKey && this.activeDispatchByScopeKey) {
+        this.activeDispatchByScopeKey.delete(scopeKey);
+      }
     }
   }
 
@@ -839,7 +941,12 @@ class CyberbossApp {
         if (!dispatched) {
           this.systemMessageDispatcher.requeue(message);
         }
-      } catch {
+      } catch (error) {
+        if (message?.source === "checkin" || message?.source === "phone_watch") {
+          const failureLabel = message?.source === "phone_watch" ? "phone_watch" : "checkin";
+          const checkinError = formatCheckinErrorMessage(error);
+          console.warn(`[cyberboss] ${failureLabel} runtime failed: ${checkinError}`);
+        }
         this.systemMessageDispatcher?.requeue(message);
       }
     }
@@ -904,6 +1011,14 @@ class CyberbossApp {
   }
 
   async flushDueReminders(account) {
+    if (this.persistentRuleScheduler && typeof this.persistentRuleScheduler.evaluateDailyRules === "function") {
+      try {
+        this.persistentRuleScheduler.evaluateDailyRules({ account, nowMs: Date.now() });
+      } catch (error) {
+        console.warn(`[cyberboss] daily rule evaluation failed: ${error.message}`);
+      }
+    }
+
     const dueReminders = this.reminderQueue
       .listDue(Date.now())
       .filter((reminder) => reminder.accountId === account.accountId);
@@ -917,6 +1032,13 @@ class CyberbossApp {
           workspaceRoot: this.resolveReminderWorkspaceRoot(reminder),
           text: buildReminderSystemTrigger(reminder, this.config),
           createdAt: new Date().toISOString(),
+          source: "reminder",
+          origin: reminder.origin || "user",
+          deliveryRequired: reminder.deliveryRequired !== false,
+          reminderId: reminder.id,
+          reminderText: reminder.text,
+          fallbackText: reminder.text,
+          dueAtMs: reminder.dueAtMs,
         });
       } catch {
         this.reminderQueue.enqueue({
@@ -937,9 +1059,21 @@ class CyberbossApp {
   }
 
   async dispatchSystemMessage(message) {
-    const prepared = this.systemMessageDispatcher?.buildPreparedMessage(message, this.channelAdapter.getKnownContextTokens()[message.senderId] || "");
+    const knownTokens = this.channelAdapter.getKnownContextTokens();
+    const contextToken = knownTokens[message.senderId] || "";
+    const isSilentSource = message?.source === "checkin" || message?.source === "phone_watch";
+    if (isSilentSource && !contextToken) {
+      console.warn(
+        `[cyberboss] proactive turn skipped: missing valid context token for user=${message.senderId} source=${message.source}`
+      );
+      return true;
+    }
+    const prepared = this.systemMessageDispatcher?.buildPreparedMessage(message, contextToken);
     if (!prepared) {
       throw new Error("system message could not be prepared");
+    }
+    if (prepared.contextToken && contextToken && prepared.contextToken !== contextToken) {
+      throw new Error(`Context token mismatch: prepared for ${prepared.senderId} does not match token cache`);
     }
     const bindingKey = this.runtimeAdapter.getSessionStore().buildBindingKey({
       workspaceId: prepared.workspaceId,
@@ -1496,12 +1630,50 @@ class CyberbossApp {
       }
       try {
         this.turnGateStore.releaseThread(event.payload.threadId);
+        // Fallback for the AGY terminal-event timing race: the Antigravity CLI
+        // emits its result event synchronously during process.on("close"), which
+        // means runtime.turn.completed can reach here *before* sendTurn() resolves
+        // and dispatchPreparedTurn calls attachThread().  In that case
+        // releaseThread() finds no scopeByThreadId entry and returns without
+        // clearing pendingScopeKeys.  We recover by calling releaseScope()
+        // directly on the binding that SessionStore already recorded (the session
+        // store is written before runtime events are emitted).
+        if (linked?.bindingKey && linked?.workspaceRoot) {
+          this.turnGateStore.releaseScope(linked.bindingKey, linked.workspaceRoot);
+        }
         if (event.type === "runtime.turn.failed") {
-          await this.sendFailureToThread(
-            event.payload.threadId,
-            event.payload.text || "❌ Execution failed",
-            failureReplyTarget,
-          );
+          const effectiveScopeKey = scopeKey || this.turnGateStore?.scopeByThreadId?.get?.(event.payload.threadId) || "";
+          let activeDispatch = effectiveScopeKey && this.activeDispatchByScopeKey
+            ? this.activeDispatchByScopeKey.get(effectiveScopeKey)
+            : null;
+          if (!activeDispatch && this.activeDispatchByScopeKey?.size === 1) {
+            activeDispatch = this.activeDispatchByScopeKey.values().next().value;
+          }
+          const isSilentSource = activeDispatch?.prepared?.source === "checkin"
+            || activeDispatch?.prepared?.source === "phone_watch"
+            || failureReplyTarget?.source === "checkin"
+            || failureReplyTarget?.source === "phone_watch";
+          const combinedFailureTarget = {
+            ...(activeDispatch?.prepared ? {
+              source: activeDispatch.prepared.source,
+              deliveryRequired: activeDispatch.prepared.deliveryRequired,
+              fallbackText: activeDispatch.prepared.fallbackText || activeDispatch.prepared.reminderText,
+            } : {}),
+            ...failureReplyTarget,
+          };
+          if (!isSilentSource) {
+            await this.sendFailureToThread(
+              event.payload.threadId,
+              event.payload.text || "❌ Execution failed",
+              combinedFailureTarget,
+            );
+          } else {
+            const failureLabel = (activeDispatch?.prepared?.source === "phone_watch" || failureReplyTarget?.source === "phone_watch")
+              ? "phone_watch"
+              : "checkin";
+            const checkinError = formatCheckinErrorMessage(event.payload?.text || "unknown error");
+            console.warn(`[cyberboss] ${failureLabel} runtime failed: ${checkinError}`);
+          }
         }
         if (linked?.bindingKey && linked?.workspaceRoot) {
           await this.flushPendingInboundMessages({
@@ -1596,17 +1768,30 @@ class CyberbossApp {
 
   async sendFailureToThread(threadId, text, fallbackTarget = null) {
     const linked = this.runtimeAdapter.getSessionStore().findBindingForThreadId(threadId);
-    const target = normalizeReplyTarget(
-      linked?.bindingKey ? this.resolveReplyTargetForBinding(linked.bindingKey) : null
-    ) || normalizeReplyTarget(fallbackTarget);
+    const bindingTarget = linked?.bindingKey ? this.resolveReplyTargetForBinding(linked.bindingKey) : null;
+    const target = normalizeReplyTarget({
+      ...fallbackTarget,
+      ...bindingTarget,
+    }) || normalizeReplyTarget(fallbackTarget);
     if (!target) {
       return;
     }
+    if (target.source === "checkin" || target.source === "phone_watch") {
+      return;
+    }
+    const isDeliveryRequiredReminder = target.source === "reminder" && Boolean(target.deliveryRequired);
+    const effectiveText = (isDeliveryRequiredReminder && target.fallbackText)
+      ? target.fallbackText
+      : (normalizeText(text) || "❌ Execution failed");
     await this.channelAdapter.sendText({
       userId: target.userId,
-      text: normalizeText(text) || "❌ Execution failed",
+      text: effectiveText,
       contextToken: target.contextToken,
-    }).catch(() => {});
+    }).catch((err) => {
+      console.warn(
+        `[cyberboss] failed to deliver runtime failure to WeChat thread=${threadId || ""} user=${target.userId || ""} error=${err?.message || String(err)}`
+      );
+    });
   }
 
   async sendApprovalPrompt({ bindingKey, approval }) {
@@ -1695,11 +1880,21 @@ function normalizeReplyTarget(target) {
   if (!target?.userId || !target?.contextToken) {
     return null;
   }
-  return {
+  const normalized = {
     userId: String(target.userId).trim(),
     contextToken: String(target.contextToken).trim(),
     provider: normalizeText(target.provider),
   };
+  if (target.source) {
+    normalized.source = normalizeText(target.source);
+  }
+  if (typeof target.deliveryRequired === "boolean") {
+    normalized.deliveryRequired = target.deliveryRequired;
+  }
+  if (target.fallbackText) {
+    normalized.fallbackText = String(target.fallbackText).trim();
+  }
+  return normalized;
 }
 
 function formatCompactNumber(value) {
@@ -1863,7 +2058,10 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-module.exports = { CyberbossApp };
+module.exports = {
+  CyberbossApp,
+  formatCheckinErrorMessage,
+};
 
 function parseChannelCommand(text) {
   const normalized = typeof text === "string" ? text.trim() : "";
@@ -2333,4 +2531,22 @@ function stringifyRpcId(value) {
 
 function hasRpcId(value) {
   return stringifyRpcId(value) !== "";
+}
+
+function formatCheckinErrorMessage(error, maxLength = 300) {
+  const raw = error instanceof Error
+    ? error.message || error.name || "unknown error"
+    : (typeof error?.message === "string" && error.message ? error.message : String(error || "unknown error"));
+  const sanitized = raw
+    .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [REDACTED]")
+    .replace(/(?:token|key|secret|password|credential)[=:\s]+[A-Za-z0-9._~+/-]{8,}/gi, (match) => {
+      const prefix = match.split(/[=:\s]+/)[0];
+      return `${prefix}=[REDACTED]`;
+    })
+    .replace(/[\r\n\t]+/g, " ")
+    .trim();
+  if (sanitized.length <= maxLength) {
+    return sanitized;
+  }
+  return `${sanitized.slice(0, maxLength)}...`;
 }

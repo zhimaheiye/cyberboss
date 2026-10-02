@@ -1,0 +1,243 @@
+function mapAntigravityMessageToRuntimeEvents(raw, context = {}) {
+  if (!raw || typeof raw !== "object") {
+    return [];
+  }
+
+  const turnId = context.turnId || "";
+  const event = raw.event;
+
+  switch (event) {
+    case "init": {
+      const threadId = raw.conversation_id || context.fallbackThreadId || "";
+      if (!threadId) {
+        return [];
+      }
+      return [
+        {
+          type: "runtime.turn.started",
+          payload: {
+            threadId,
+            turnId,
+          },
+        },
+      ];
+    }
+
+    case "step_update": {
+      // Stage 2 intentionally ignores step_update events (including agent_response deltas)
+      // to rely purely on the stable result.response and prevent duplicate replies.
+      return [];
+    }
+
+    case "result": {
+      const result = raw.result || {};
+      const threadId = result.conversation_id || raw.conversation_id || context.fallbackThreadId || "";
+      const status = result.status;
+      const usage = result.usage;
+      const events = [];
+
+      if (usage && typeof usage === "object") {
+        events.push({
+          type: "runtime.context.updated",
+          payload: {
+            runtimeId: "antigravity",
+            threadId,
+            turnId,
+            inputTokens: Number(usage.input_tokens) || 0,
+            cacheReadInputTokens: Number(usage.cache_read_tokens) || 0,
+            outputTokens: Number(usage.output_tokens) || 0,
+            reasoningTokens: Number(usage.thinking_tokens) || 0,
+            currentTokens: Number(usage.total_tokens) || 0,
+          },
+        });
+      }
+
+      if (isSuccessfulResultEvent(result, threadId)) {
+        const responseText = typeof result.response === "string" ? result.response.trim() : "";
+        if (responseText) {
+          events.push({
+            type: "runtime.reply.completed",
+            payload: {
+              threadId,
+              turnId,
+              itemId: `agy-result-${turnId}`,
+              text: responseText,
+            },
+          });
+        }
+        events.push({
+          type: "runtime.turn.completed",
+          payload: {
+            threadId,
+            turnId,
+            text: responseText,
+          },
+        });
+      } else {
+        const errorText = formatResultFailureReason(result, 0);
+
+        events.push({
+          type: "runtime.turn.failed",
+          payload: {
+            threadId,
+            turnId,
+            text: String(errorText),
+          },
+        });
+      }
+
+      return events;
+    }
+
+    default:
+      return [];
+  }
+}
+
+const BLOCKED_PERSISTENT_TOOLS = new Set([
+  "schedule",
+  "manage_task",
+  "wait",
+  "sleep",
+]);
+
+function extractBlockedPersistentTool(raw) {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  const step = raw.step_update || raw.step || raw;
+  let toolName = (step.tool_name || raw.tool_name || "").trim().toLowerCase();
+
+  if (!toolName && Array.isArray(step.tool_calls) && step.tool_calls.length > 0) {
+    const firstCall = step.tool_calls[0];
+    if (firstCall && typeof firstCall === "object") {
+      toolName = (firstCall.name || firstCall.tool_name || "").trim().toLowerCase();
+    }
+  }
+
+  if (BLOCKED_PERSISTENT_TOOLS.has(toolName)) {
+    return toolName;
+  }
+
+  if (toolName === "call_mcp_tool") {
+    const input = step.tool_input || raw.tool_input || step.args || raw.args || {};
+    const innerTool = String(input.ToolName || input.tool_name || input.tool || "").trim().toLowerCase();
+    if (BLOCKED_PERSISTENT_TOOLS.has(innerTool)) {
+      return `call_mcp_tool(${innerTool})`;
+    }
+  }
+
+  return null;
+}
+
+const KNOWN_SUCCESS_STATUSES = new Set(["SUCCESS", "DONE", "COMPLETED"]);
+const KNOWN_FAILURE_STATUSES = new Set(["FAILED", "ERROR", "FAILURE", "CANCELLED", "CANCELED"]);
+
+function normalizeStatus(status) {
+  if (typeof status !== "string") {
+    return "";
+  }
+  return status.trim().toUpperCase();
+}
+
+function extractResultError(resultEvent) {
+  if (!resultEvent || typeof resultEvent !== "object") {
+    return "";
+  }
+  if (typeof resultEvent.error === "string") {
+    return resultEvent.error.trim();
+  }
+  if (resultEvent.error && typeof resultEvent.error === "object") {
+    if (typeof resultEvent.error.message === "string") {
+      return resultEvent.error.message.trim();
+    }
+    try {
+      const serialized = JSON.stringify(resultEvent.error);
+      return serialized === "{}" ? "" : serialized;
+    } catch {
+      return String(resultEvent.error);
+    }
+  }
+  return "";
+}
+
+function isSuccessfulResultEvent(resultEvent, finalConversationId) {
+  if (!resultEvent || typeof resultEvent !== "object") {
+    return false;
+  }
+  if (!finalConversationId || typeof finalConversationId !== "string" || !finalConversationId.trim()) {
+    return false;
+  }
+  const errorText = extractResultError(resultEvent);
+  if (errorText) {
+    return false;
+  }
+  const normalizedStatus = normalizeStatus(resultEvent.status);
+  if (KNOWN_FAILURE_STATUSES.has(normalizedStatus)) {
+    return false;
+  }
+  if (KNOWN_SUCCESS_STATUSES.has(normalizedStatus)) {
+    return true;
+  }
+  if (!normalizedStatus) {
+    return resultEvent.response !== undefined;
+  }
+  // Unknown non-empty status (e.g., WEIRD_STATE) is rejected
+  return false;
+}
+
+function formatResultFailureReason(resultEvent, code = 0) {
+  if (!resultEvent || typeof resultEvent !== "object") {
+    return code !== 0 ? `antigravity process exited with code ${code}` : "antigravity turn failed";
+  }
+  const normalizedStatus = normalizeStatus(resultEvent.status);
+  const errorDetail = extractResultError(resultEvent);
+
+  if (isAntigravityAuthError(errorDetail)) {
+    return AUTH_REQUIRED_MESSAGE;
+  }
+
+  if (KNOWN_FAILURE_STATUSES.has(normalizedStatus)) {
+    const detail = errorDetail || "unknown error";
+    return `antigravity turn failed with status ${resultEvent.status}: ${detail}`;
+  }
+
+  if (errorDetail) {
+    return `antigravity turn failed: ${errorDetail}`;
+  }
+
+  if (normalizedStatus) {
+    return `antigravity returned unsupported result status "${resultEvent.status}"`;
+  }
+
+  if (resultEvent.response === undefined) {
+    return "antigravity result event missing response";
+  }
+
+  return `antigravity turn failed${code !== 0 ? ` with exit code ${code}` : ""}`;
+}
+
+const AUTH_REQUIRED_MESSAGE = "AGY authentication required. Please sign in on the desktop.";
+
+function isAntigravityAuthError(text) {
+  if (typeof text !== "string") {
+    return false;
+  }
+  return /Authentication required|authentication failed or timed out|not logged into Antigravity/i.test(text);
+}
+
+module.exports = {
+  mapAntigravityMessageToRuntimeEvents,
+  extractBlockedPersistentTool,
+  BLOCKED_PERSISTENT_TOOLS: Array.from(BLOCKED_PERSISTENT_TOOLS),
+  isSuccessfulResultEvent,
+  formatResultFailureReason,
+  extractResultError,
+  normalizeStatus,
+  KNOWN_SUCCESS_STATUSES,
+  KNOWN_FAILURE_STATUSES,
+  AUTH_REQUIRED_MESSAGE,
+  isAntigravityAuthError,
+};
+

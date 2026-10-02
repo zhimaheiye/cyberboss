@@ -66,6 +66,7 @@ class SystemMessageService {
       workspaceRoot: resolvedWorkspaceRoot,
       text: normalizedText,
       createdAt: new Date().toISOString(),
+      source: "system",
     });
   }
 }
