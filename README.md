@@ -486,6 +486,25 @@ Because the first `cyberboss` command auto-generates `~/.cyberboss/weixin-instru
 
 If you want the strongest "cyberboss" effect, let the agent grow its pacing through real interaction first. If you over-script it too early, it starts sounding like a workflow script instead of an active companion.
 
+### WeChat messages get no reply even though the model and API are fine?
+
+Suspect a stuck previous turn first, not the model config. While the previous turn of a bound thread is still running, new inbound WeChat messages are buffered and only delivered after that turn ends; if the previous turn never ends, no reply ever goes out.
+
+One real-world stall: a system reminder turn (for example a bedtime reminder) called a read-only tool that was not on any approval allowlist, so the turn entered the waiting-for-approval state. Approval prompts are sent to WeChat and can be answered with `/yes`, `/always`, or `/no`; if the prompt is never delivered or never answered, the turn stays stuck and later messages keep piling up in the buffer.
+
+Diagnosis order:
+
+- Check the bound session's jsonl transcript: if it ends on `tool_use` blocks with no matching `tool_result`, the turn is stuck waiting for tool results or approval;
+- Check whether the thread state is stuck at `waiting_approval`;
+- When relay/proxy logs show normal 200 responses, rule out model and API issues first, then check approvals.
+
+Prevention: allowlist the read-only tools used by automated flows (reminders, check-ins). Keep in mind there are two allowlist layers:
+
+- Cyberboss's own approval allowlist: `${HOME}/.cyberboss/sessions.json`, which can also be accumulated via `/always` in WeChat;
+- The Claude Code runtime's project permission file: `.claude/settings.local.json` in the bound workspace.
+
+Either change requires restarting Cyberboss to take effect.
+
 ## License
 
 This project is built for local-first personal deployment. It continuously processes private chat content, reminders, life traces, and other highly sensitive personal context. I do not want that workflow to be repackaged into a closed cloud service that hides both the code path and the data path from the user.
