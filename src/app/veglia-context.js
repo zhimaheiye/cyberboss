@@ -245,12 +245,16 @@ function detectInteractiveEntertainment(ctxOrPresence = null) {
       continue;
     }
 
+    const touchBilibili = /lenovo-touch/i.test(String(device.device_id || ""))
+      && /哔哩哔哩|bilibili|\bb\s*站\b|B站/i.test(blob);
+    const noiseTitle = /白噪音|轻音乐|纯音乐|播放列表|频谱|番茄钟/.test(`${title} ${label}`);
     hits.push({
       device_id: device.device_id || "",
       app: label || title || "?",
       title: title.slice(0, 80),
       idle_seconds: idle,
       scroll_like: SHORT_VIDEO_OR_SCROLL_RE.test(blob),
+      screenshot_first: touchBilibili && (noiseTitle || !String(title).trim()),
     });
   }
 
@@ -265,15 +269,26 @@ function detectInteractiveEntertainment(ctxOrPresence = null) {
   }
 
   const studyOrWork = devicesSomeStudyWork(devices);
-  // Prefer send when clear interactive entertainment is the focus.
-  // Hang exemption only when PC study/work is primary AND entertainment device is hang-idle — already filtered.
+  const autoHits = hits.filter((hit) => !hit.screenshot_first);
+  const shotHits = hits.filter((hit) => hit.screenshot_first);
+  // Lenovo-touch Bilibili is often white noise. Title alone is not enough:
+  // do not prefer-send until a screenshot shows a real video.
+  if (!autoHits.length && shotHits.length) {
+    return {
+      interactive: true,
+      prefer_send: false,
+      reason: "lenovo_bilibili_screenshot_first",
+      hits: shotHits,
+      study_or_work_primary: studyOrWork,
+    };
+  }
   return {
     interactive: true,
     prefer_send: true,
     reason: studyOrWork
       ? "interactive_entertainment_alongside_study_still_nudge_eligible"
       : "clear_interactive_entertainment",
-    hits,
+    hits: autoHits.concat(shotHits),
     study_or_work_primary: studyOrWork,
   };
 }

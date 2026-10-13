@@ -142,8 +142,12 @@ function buildCheckinTrigger(config, presence) {
     "SUMMARY:",
     presence.summary,
     "RULES: Judge only from this snapshot + recent WeChat.",
+    "SLEEP_AND_TIMELINE: Around 01:00 Asia/Shanghai, if tonight's bedtime WeChat was not sent, send one short line: prepare for bed and look at the paper checklist. Do not list checklist items. Once per night. Record the day with cyberboss_timeline_write when the person or foreground actually changed. Do not write /home/box/companion/life. Grok sampler and nightly digest are off.",
+    "DAYTIME_LIGHT_TOUCH: Grok routine is off. Around 11:20, 14:20, 16:20, 19:20, 21:20 Asia/Shanghai, if that slot was not sent today, one short presence line is ok. Not a study nag. A light touch does not cancel an entertainment nudge. Never during 03:00-09:00.",
   ];
 
+  const needsShot = (entertainment.hits || []).some((hit) => hit.screenshot_first);
+  const shotLine = "LENOVO_TOUCH_BILIBILI: 触屏本正在开 B 站。窗口标题不够。先用 Veglia 截这台屏幕再决定。画面是白噪音、轻音乐、纯音乐、播放列表、频谱或静止背景 → 不算玩，不要催。画面是正片、弹幕、评论、在看视频 → 这才是娱乐，冷却过了就发一句短提醒。不要因为这台电脑以前放过白噪音，就把没在放的时候也放过。";
   if (entertainment.prefer_send) {
     const hitText = entertainment.hits
       .map((hit) => `${hit.device_id}:${hit.app}${hit.idle_seconds === null || hit.idle_seconds === undefined ? "" : ` idle=${Math.round(hit.idle_seconds)}s`}`)
@@ -153,6 +157,12 @@ function buildCheckinTrigger(config, presence) {
       "PREFER_SEND: clear interactive entertainment/scroll is live (B站/哔哩哔哩、MuMu 模拟器 idle<120、小红书/短视频、游戏等). Prefer ONE short Chinese send_message nudge.",
       "Do NOT default to silent. Do NOT hide behind a prior daytime light-touch cooldown. Do NOT apply happyfish/Maa hang-script exemption here — that exemption is ONLY when PC study/work is primary AND phone/emulator is hung idle, NOT when primary focus is Bilibili/MuMu interactive/games.",
       "Still forbid study-spam with no evidence. Quiet hours / away_or_asleep already gated upstream.",
+      ...(needsShot ? [shotLine] : []),
+    );
+  } else if (needsShot) {
+    lines.push(
+      shotLine,
+      "Do not prefer-send from the window title. Screenshot first, then either silent (white noise) or one short Chinese nudge (real video).",
     );
   } else {
     lines.push(

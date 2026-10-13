@@ -28,3 +28,8 @@
 - 上游：`WenXiaoWendy/cyberboss`；本 fork：`zhimaheiye/cyberboss`。
 - 陪伴工作区规则与时间轴仍在云电脑 `/home/box/companion`（不进本仓库，避免日记/状态噪音）。
 - 不含 `.env` / API Key。
+
+## 2026-10-13 查岗并入睡前/轻触提醒；触屏本 B 站先截图
+
+- 问题：01:00 睡前提醒和白天轻触原由 Grok 定时任务负责，已暂停；触屏本开 B 站常是白噪音，只看窗口标题会误催。
+- 修复：`system-checkin-poller.js` 查岗提示加入 01:00 睡前一句提醒（不列清单）和白天 11:20/14:20/16:20/19:20/21:20 轻触；`veglia-context.js` 对 lenovo-touch 上的 B 站标记 screenshot_first，先截图判断是白噪音还是在看视频再决定是否提醒。
