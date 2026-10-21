@@ -114,3 +114,6 @@ Notes:
 - there is no separate `/context` command; use `/status` and read the `📦 context` line
 - `/compact` asks the current thread to compact its context and reports start / finish back to WeChat
 - file sending is still available, but no longer exposed as a WeChat command
+# Qoder runtime command scope
+
+Set `CYBERBOSS_RUNTIME=qoder` before `npm run shared:start`. `npm run shared:status` reports `qoder_cli=available|unavailable`; `readyz=skipped` because Qoder does not use Codex app-server. `npm run shared:open` reports that terminal attachment is unavailable. In WeChat, `/status`, `/model`, `/new`, `/stop`, and `/reread` use Qoder's own scoped session. `/switch` is disabled to prevent arbitrary session access; `/compact` is not implemented; `/yes`, `/always`, and `/no` have no Qoder headless approval request to answer. Model-driven project tools are disabled in the current Qoder text preview.

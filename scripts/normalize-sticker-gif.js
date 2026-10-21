@@ -29,19 +29,14 @@ function main() {
     return;
   }
 
-  if (process.platform !== "darwin") {
-    throw new Error("Sticker GIF normalization for non-GIF inputs currently requires macOS `sips`.");
-  }
-  if (!fs.existsSync(SIPS_PATH)) {
-    throw new Error(`Required tool missing: ${SIPS_PATH}`);
-  }
-
   const normalizedSize = Number.isInteger(size) && size > 0 ? size : DEFAULT_SIZE;
-  const result = spawnSync(SIPS_PATH, [
-    "-s", "format", "gif",
-    "-z", String(normalizedSize), String(normalizedSize),
-    resolvedInputPath,
-    "--out", resolvedOutputPath,
+  const useSips = process.platform === "darwin" && fs.existsSync(SIPS_PATH);
+  const result = spawnSync(useSips ? SIPS_PATH : "ffmpeg", useSips ? [
+    "-s", "format", "gif", "-z", String(normalizedSize), String(normalizedSize),
+    resolvedInputPath, "--out", resolvedOutputPath,
+  ] : [
+    "-hide_banner", "-loglevel", "error", "-y", "-i", resolvedInputPath,
+    "-vf", `scale=${normalizedSize}:${normalizedSize}`, resolvedOutputPath,
   ], {
     encoding: "utf8",
   });
@@ -49,7 +44,7 @@ function main() {
   if (result.status !== 0) {
     const stderr = String(result.stderr || "").trim();
     const stdout = String(result.stdout || "").trim();
-    throw new Error(`sips gif normalization failed: ${stderr || stdout || `exit ${result.status}`}`);
+    throw new Error(`GIF normalization failed: ${stderr || stdout || result.error?.message || `exit ${result.status}`}`);
   }
   if (!fs.existsSync(resolvedOutputPath)) {
     throw new Error(`GIF normalization produced no output: ${resolvedOutputPath}`);

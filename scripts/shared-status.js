@@ -1,4 +1,5 @@
 const http = require("http");
+const { execFile } = require("child_process");
 const {
   listenUrl,
   appServerPidFile,
@@ -16,9 +17,17 @@ async function main() {
   printPidState("shared_cyberboss_pid", bridgePidFile);
   if (!isCodex) {
     console.log(`readyz=skipped`);
+    if (runtime === "qoder") console.log(`qoder_cli=${await checkQoderCli() ? "available" : "unavailable"}`);
   } else {
     console.log(`readyz=${await checkReadyz() ? "ok" : "down"}`);
   }
+}
+
+function checkQoderCli() {
+  return new Promise((resolve) => {
+    execFile(process.env.CYBERBOSS_QODER_COMMAND || "qoder", ["--version"],
+      { timeout: 5000 }, (error, stdout) => resolve(!error && !!String(stdout).trim()));
+  });
 }
 
 function printPidState(label, filePath) {

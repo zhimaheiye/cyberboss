@@ -3,7 +3,7 @@
 中文 · [English](./README.md)
 
 # 《霸道总裁爱上患有 ADHD 的我》
-## 支持 Codex 与 Claude Code 的微信桥接系统：Cyberboss
+## 支持 Codex、Claude Code 与 Qoder 的微信桥接系统：Cyberboss
 
 > “你尽管在多巴胺里逃避，但我永远会在下一个时间戳抓到你。”
 
@@ -31,7 +31,22 @@
 
 Cyberboss 不是另一个平庸的番茄钟，也不是一个只会堆积任务的待办清单。
 
-它是一个把本地 coding runtime 深度接入微信的 Agent Bridge。当前同时支持 Codex 和 Claude Code，但日常使用命令和行为保持一致。它的存在不是为了“提醒你开始”，而是直接化身为那个拥有绝对时间感、盯死进度、在你消失太久时会主动破屏而出的“赛博老板”。
+它是一个把本地 coding runtime 深度接入微信的 Agent Bridge。支持 Codex、Claude Code 和 Qoder。它的存在不是为了“提醒你开始”，而是直接化身为那个拥有绝对时间感、盯死进度、在你消失太久时会主动破屏而出的“赛博老板”。
+
+### Qoder CLI 运行时（纯文本预览）
+
+先安装并登录 Qoder CLI（当前验证版本 1.1.73），确认 `qoder --list-models` 显示目标模型。使用 Node.js 22 及以上，在 `~/.cyberboss/.env` 设置：
+
+```dotenv
+CYBERBOSS_RUNTIME=qoder
+CYBERBOSS_QODER_MODEL=Qwen3.8-Flash
+# 可选：CYBERBOSS_QODER_COMMAND=/path/to/qoder 或 qodercn
+# 可选：CYBERBOSS_QODER_TIMEOUT_MS=120000
+```
+
+然后运行 `npm run shared:start`；`npm run shared:status` 会显示桥进程与 CLI 可用性。现有微信账号、允许用户和工作区绑定继续由 CyberBoss 管理。Qoder 每轮通过 stdin 接收提示并以 `--resume <session-id>` 续聊，session ID 按微信发送者和工作区独立保存。`/new`、`/stop`、`/status`、`/model`、`/reread` 可用；为防止跨用户会话串线，`/switch` 暂不支持，`/compact` 和交互审批也不支持。`shared:open` 无法附着到微信里的 Qoder 无头进程；终端直接运行 `qoder` 会开启另一条会话。
+
+当前 Qoder 模式禁用内建编码工具和 MCP 工具，仅处理文本、系统消息和 checkin 的结构化回复。日记、提醒、时间轴、发送文件等需要模型调用项目工具的动作暂不可用；请勿把模型口头声称的完成当作真实工具回执。对图片和文件输入仅使用核心已有的安全降级说明。Codex 与 Claude Code 的工具能力不受此模式影响。
 
 ## 为什么需要 Cyberboss？
 

@@ -47,6 +47,12 @@ async function main() {
     process.exit(1);
   }
 
+  if (runtime === "qoder") {
+    console.error("Qoder shared:open cannot attach to the running WeChat headless session.");
+    console.error("Use WeChat for the bound conversation; qoder in a terminal starts a separate session.");
+    process.exit(1);
+  }
+
   if (runtime !== "claudecode") {
     console.error(`Unsupported CYBERBOSS_RUNTIME: ${runtime || "(empty)"}`);
     process.exit(1);

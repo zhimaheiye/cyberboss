@@ -8,6 +8,7 @@ const { persistIncomingWeixinAttachments } = require("../adapters/channel/weixin
 const { createCodexRuntimeAdapter } = require("../adapters/runtime/codex");
 const { createClaudeCodeRuntimeAdapter } = require("../adapters/runtime/claudecode");
 const { createAntigravityRuntimeAdapter } = require("../adapters/runtime/antigravity");
+const { createQoderRuntimeAdapter } = require("../adapters/runtime/qoder");
 const { findModelByQuery } = require("../adapters/runtime/codex/model-catalog");
 const { createTimelineIntegration } = require("../integrations/timeline");
 const {
@@ -68,6 +69,9 @@ function createRuntimeAdapter(config) {
 
   if (runtime === "antigravity") {
     return createAntigravityRuntimeAdapter(config);
+  }
+  if (runtime === "qoder") {
+    return createQoderRuntimeAdapter(config);
   }
 
   throw new Error(
@@ -1087,7 +1091,9 @@ class CyberbossApp {
     const runtimeParams = sessionStore.getRuntimeParamsForWorkspace(bindingKey, workspaceRoot);
     const storedModel = runtimeParams.model || "";
     const storedModelProvider = runtimeParams.modelProvider || this.runtimeAdapter.describe().modelProvider || "";
-    const effectiveModel = this.runtimeAdapter.describe().model || storedModel;
+    const effectiveModel = runtimeName === "qoder"
+      ? (storedModel || this.runtimeAdapter.describe().model)
+      : (this.runtimeAdapter.describe().model || storedModel);
 
     const lines = [
       `📍 workspace: ${workspaceRoot}`,
@@ -1221,6 +1227,14 @@ class CyberbossApp {
   }
 
   async handleSwitchCommand(normalized, command) {
+    if (this.runtimeAdapter.describe?.().id === "qoder") {
+      await this.channelAdapter.sendText({
+        userId: normalized.senderId,
+        text: "Qoder cannot switch to an arbitrary session ID. Use /new to start a separate conversation.",
+        contextToken: normalized.contextToken,
+      });
+      return;
+    }
     const targetThreadId = normalizeThreadId(command.args);
     if (!targetThreadId) {
       await this.channelAdapter.sendText({
@@ -1264,6 +1278,18 @@ class CyberbossApp {
       senderId: normalized.senderId,
     });
     const workspaceRoot = this.resolveWorkspaceRoot(bindingKey);
+    if (this.runtimeAdapter.describe?.().id === "qoder") {
+      const active = this.runtimeAdapter.getActiveTurnForScope({ bindingKey, workspaceRoot });
+      if (!active) {
+        await this.channelAdapter.sendText({ userId: normalized.senderId,
+          text: "💡 There is no running Qoder turn right now.", contextToken: normalized.contextToken });
+        return;
+      }
+      await this.runtimeAdapter.cancelTurn({ bindingKey, workspaceRoot, turnId: active.turnId });
+      await this.channelAdapter.sendText({ userId: normalized.senderId,
+        text: "⏹️ Qoder turn stopped.", contextToken: normalized.contextToken });
+      return;
+    }
     const threadId = this.runtimeAdapter.getSessionStore().getThreadIdForWorkspace(bindingKey, workspaceRoot);
     const threadState = threadId ? this.threadStateStore.getThreadState(threadId) : null;
     if (!threadId || !threadState?.turnId || !["running", "waiting_approval"].includes(threadState.status)) {
@@ -1427,7 +1453,7 @@ class CyberbossApp {
 
     const runtimeId = this.runtimeAdapter.describe().id || "runtime";
     let matched = findModelByQuery(catalog?.models || [], query);
-    if (!matched && runtimeId !== "codex" && !catalog?.models?.length) {
+    if (!matched && runtimeId !== "codex" && runtimeId !== "qoder" && !catalog?.models?.length) {
       matched = { model: query };
     }
     if (!matched) {

@@ -3,7 +3,7 @@
 [中文](./README.zh-CN.md) · English
 
 # The Overbearing Boss Fell for My ADHD
-## Cyberboss: a WeChat bridge for Codex and Claude Code
+## Cyberboss: a WeChat bridge for Codex, Claude Code, and Qoder
 
 > "Keep escaping into dopamine if you want. I'll still catch you at the next timestamp."
 
@@ -31,6 +31,12 @@
 Cyberboss is not another polite productivity timer. It is not a to-do list with better branding either.
 
 It is an agent bridge that plugs a local coding runtime directly into WeChat and turns it into a time-aware, context-persistent accountability companion. It supports Codex and Claude Code while keeping the same commands and day-to-day behavior. It does not wait for you to "start a session". It watches the flow of your day, notices when you disappear, and decides when to show up again.
+
+### Qoder CLI runtime (text preview)
+
+Install and sign in to Qoder CLI, use Node.js 22+, and check `qoder --list-models`. Set `CYBERBOSS_RUNTIME=qoder` and optionally `CYBERBOSS_QODER_MODEL=Qwen3.8-Flash`, `CYBERBOSS_QODER_COMMAND=qoder` (or `qodercn`), and `CYBERBOSS_QODER_TIMEOUT_MS=120000` in `~/.cyberboss/.env`. Start with `npm run shared:start`; `npm run shared:status` checks the bridge and CLI. Existing WeChat accounts and bindings remain in CyberBoss. Qoder sessions resume by ID within each sender and workspace. `/new`, `/stop`, `/status`, `/model`, and `/reread` work. `/switch` is disabled to avoid cross-sender session access; `/compact` and interactive approval are unavailable. `shared:open` cannot attach to a headless Qoder turn.
+
+The Qoder mode currently disables built-in coding and MCP tools. Plain text replies and structured checkin replies work through the existing CyberBoss delivery path. Model-driven diary, reminder, timeline, and file-send tools are not yet available. Do not treat a model's verbal claim as a tool receipt. Codex and Claude Code tool behavior is unchanged.
 
 ## Why Cyberboss?
 

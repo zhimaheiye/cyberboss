@@ -83,6 +83,9 @@ function readConfig() {
     antigravityEffort: readTextEnv("CYBERBOSS_ANTIGRAVITY_EFFORT") || "",
     antigravityExtraArgs: readListEnv("CYBERBOSS_ANTIGRAVITY_EXTRA_ARGS"),
     antigravityTimeoutMs: readIntEnv("CYBERBOSS_ANTIGRAVITY_TIMEOUT_MS") || 120_000,
+    qoderCommand: readTextEnv("CYBERBOSS_QODER_COMMAND") || "qoder",
+    qoderModel: readTextEnv("CYBERBOSS_QODER_MODEL") || "Qwen3.8-Flash",
+    qoderTimeoutMs: readIntEnv("CYBERBOSS_QODER_TIMEOUT_MS") || 120_000,
     sessionsFile: path.join(stateDir, "sessions.json"),
     startWithCheckin: (mode === "start" && hasArgFlag(argv, "--checkin")) || readBoolEnv("CYBERBOSS_ENABLE_CHECKIN"),
   };

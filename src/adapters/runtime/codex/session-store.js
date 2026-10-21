@@ -31,6 +31,7 @@ class SessionStore {
             models: [],
             updatedAt: "",
           },
+          availableModelCatalogByRuntime: parsed.availableModelCatalogByRuntime || {},
         };
       }
     } catch {
@@ -312,7 +313,9 @@ class SessionStore {
   }
 
   getAvailableModelCatalog() {
-    const raw = this.state.availableModelCatalog;
+    const raw = this.runtimeId === "qoder"
+      ? this.state.availableModelCatalogByRuntime?.qoder
+      : this.state.availableModelCatalog;
     if (!raw || typeof raw !== "object") {
       return null;
     }
@@ -329,12 +332,19 @@ class SessionStore {
     if (!normalizedModels.length) {
       return null;
     }
-    this.state.availableModelCatalog = {
+    const catalog = {
       models: normalizedModels,
       updatedAt: new Date().toISOString(),
     };
+    if (this.runtimeId === "qoder") {
+      this.state.availableModelCatalogByRuntime = {
+        ...(this.state.availableModelCatalogByRuntime || {}), qoder: catalog,
+      };
+    } else {
+      this.state.availableModelCatalog = catalog;
+    }
     this.save();
-    return this.state.availableModelCatalog;
+    return catalog;
   }
 
   buildBindingKey({ workspaceId, accountId, senderId }) {
@@ -351,6 +361,7 @@ function createEmptyState() {
       models: [],
       updatedAt: "",
     },
+    availableModelCatalogByRuntime: {},
   };
 }
 

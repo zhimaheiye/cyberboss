@@ -57,3 +57,6 @@ These capabilities should depend on external standalone projects whenever possib
   - to be split into a standalone adapter
 - codex runtime:
   - to be split into a standalone adapter
+# Qoder runtime
+
+`CYBERBOSS_RUNTIME=qoder` selects the independent Qoder CLI process adapter. It spawns one bounded headless turn per message, sends the prompt on stdin, and accepts only the successful nonempty `result` event after a zero exit code. The returned Qoder session ID is stored through `SessionStore(runtimeId="qoder")` for the current account, sender, and workspace; subsequent turns use `--resume`. The existing WeChat poller, turn gate, stream delivery, and system JSON dispatcher remain in charge. Qoder's built-in tools and external MCP servers are disabled in this text preview. There is no attachable local TUI for a running WeChat turn.
