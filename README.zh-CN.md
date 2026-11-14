@@ -22,6 +22,14 @@
 
 </div>
 
+## 本地生活工作台
+
+本分支新增独立 PWA 工作台，提供 Codex 对话、待办、周期作业、浏览器通知和本地记忆。依照 [工作台说明](docs/本地生活工作台.md) 安装依赖与 OpenTodo 后，运行 `npm run desktop` 或双击 `run-desktop.bat`。
+
+[产品说明](PRODUCT.md) · [文档入口](docs/README.md) · [当前交接](docs/handoff/CURRENT.md) · [开发历史](docs/development-history.md) · [备份与隐私](docs/backup-and-privacy.md)
+
+运行数据保存在不入 Git 的 `data/` 下。呼吸引导已形成需求档案，尚未实现。以下保留原微信桥接说明。
+
 <p align="center">
   <img src="./docs/images/chat-example-1.jpg" alt="Cyberboss 示例对话 1" width="23%" />
   <img src="./docs/images/chat-example-2.jpg" alt="Cyberboss 示例对话 2" width="23%" />

@@ -22,6 +22,14 @@
 
 </div>
 
+## Local desktop workbench
+
+This fork also provides a local PWA workbench for Codex chat, tasks, recurring jobs, browser notifications and local memory. Start with `npm run desktop` or `run-desktop.bat` after installing the dependencies and OpenTodo described in the [desktop guide](docs/本地生活工作台.md).
+
+[Product](PRODUCT.md) · [Documentation](docs/README.md) · [Current handoff](docs/handoff/CURRENT.md) · [Development history](docs/development-history.md) · [Backup and privacy](docs/backup-and-privacy.md)
+
+Runtime data stays outside Git under `data/`. The breathing feature is documented as planned and has not been implemented. The original bridge documentation follows.
+
 <p align="center">
   <img src="./docs/images/IMG_0241.PNG" alt="Cyberboss English demo 1" width="31%" />
   <img src="./docs/images/IMG_0244.PNG" alt="Cyberboss English demo 2" width="31%" />
