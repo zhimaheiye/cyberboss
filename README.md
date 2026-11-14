@@ -28,7 +28,7 @@ This fork also provides a local PWA workbench for Codex chat, tasks, recurring j
 
 [Product](PRODUCT.md) · [Documentation](docs/README.md) · [Current handoff](docs/handoff/CURRENT.md) · [Development history](docs/development-history.md) · [Backup and privacy](docs/backup-and-privacy.md)
 
-Runtime data stays outside Git under `data/`. The breathing feature is documented as planned and has not been implemented. The original bridge documentation follows.
+Runtime data stays outside Git under `data/`. Open **缓一缓** from the workbench header to start a [guided breathing session](docs/features/breathing.md).
 
 <p align="center">
   <img src="./docs/images/IMG_0241.PNG" alt="Cyberboss English demo 1" width="31%" />

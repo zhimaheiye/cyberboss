@@ -1,4 +1,4 @@
-const CACHE = 'cyberboss-shell-v3-assistant-ui';
+const CACHE = 'cyberboss-shell-v4';
 const NOTICES = 'cyberboss-notices-v1';
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(['/', '/app.js', '/style.css', '/icon.svg', '/manifest.webmanifest'])));
@@ -14,12 +14,23 @@ self.addEventListener('fetch', event => {
   event.respondWith(fetch(event.request).catch(() => caches.match(event.request)));
 });
 let noticeChain = Promise.resolve();
+async function mayDisplay(id) {
+  try {
+    const response = await fetch(`/api/notifications/display?id=${encodeURIComponent(id)}`, {
+      headers: { 'X-Cyberboss': 'desktop' }, cache: 'no-store',
+    });
+    if (response.ok) return (await response.json()).allowed;
+  } catch {
+    // Previously issued pushes can arrive after the local service has closed.
+  }
+  return true;
+}
 function notify(data) {
   noticeChain = noticeChain.catch(() => {}).then(async () => {
     if (!data?.id) return;
     const cache = await caches.open(NOTICES);
     const key = new Request(`${self.location.origin}/notice/${encodeURIComponent(data.id)}`);
-    if (await cache.match(key)) return;
+    if (await cache.match(key) || !await mayDisplay(data.id)) return;
     await self.registration.showNotification(data.title || 'CyberBoss', {
       body: data.body || '', tag: data.id, icon: '/icon.svg', data: { url: `/#message=${encodeURIComponent(data.id)}` },
     });

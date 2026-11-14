@@ -60,6 +60,13 @@ async function startDesktop(config) {
           req.on("close", () => { clearInterval(heartbeat); clients.delete(res); }); return;
         }
         if (req.method === "GET" && url.pathname === "/api/state") return json(res, 200, app.view());
+        if (req.method === "GET" && url.pathname === "/api/breathing/reminders") return json(res, 200, app.breathing.reminders());
+        if (req.method === "GET" && url.pathname === "/api/notifications/display") {
+          const message = app.store.data.messages.find(m => m.id === url.searchParams.get("id"));
+          return json(res, 200, { allowed: Boolean(message?.unread && !message.breathingSessionId
+            && ["reminder", "proactive"].includes(message.kind) && message.pushStatus !== "cancelled"
+            && !app.breathing.current()) });
+        }
         if (req.method === "GET" && url.pathname === "/api/run") {
           const run = app.store.data.runs.find(run => run.id === url.searchParams.get("id"));
           return json(res, 200, readRunHistory(app.store, run) || null);
@@ -82,6 +89,10 @@ async function startDesktop(config) {
           case "/api/login": result = await app.agent.login(); break;
           case "/api/models": result = await app.agent.refreshModels(); break;
           case "/api/settings": result = app.settings(body); break;
+          case "/api/breathing":
+            result = app.breathing.update(body);
+            if (body.action === "progress") return json(res, 200, result);
+            break;
           case "/api/tool":
             result = await app.tools.invokeTool(body.name, body.args);
             if (body.name?.startsWith("opentodo_") && !/^opentodo_(list|get|search|today)_/.test(body.name)) app.taskRevision++;

@@ -7,6 +7,7 @@ const { DesktopTools } = require("./tools");
 const { DesktopAgent } = require("./agent");
 const { saveChatImages, removeChatImages, resolveChatAttachments } = require("./chat-images");
 const { Notifications } = require("./notifications");
+const { Breathing } = require("./breathing");
 const { Maintenance } = require("./maintenance");
 const { runSummary } = require("./run-progress");
 const { BrowserBridge } = require("./browser");
@@ -22,7 +23,8 @@ class DesktopApp {
     this.maintenance = new Maintenance(this.store, changed);
     this.browser = new BrowserBridge(this.store, this.maintenance); this.skills = new LearnedSkills(this.store);
     this.tools = new DesktopTools({ store: this.store, jobs: this.jobs, todo: this.todo, maintenance: this.maintenance, browser: this.browser, skills: this.skills });
-    this.notifications = new Notifications(this.store, changed);
+    this.breathing = new Breathing(this.store, changed);
+    this.notifications = new Notifications(this.store, changed, this.breathing);
     this.agent = new DesktopAgent({ config, store: this.store, toolNames: [], changed });
     this.pumping = false; this.stopped = false; this.taskRevision = 0;
   }
@@ -40,7 +42,7 @@ class DesktopApp {
     const pendingChats = this.queue.peekForAccount("desktop")
       .filter(entry => JSON.parse(entry.text).background === false).map(entry => entry.id);
     return { settings: d.settings, jobs: d.jobs, runs: d.runs.slice(-200).map(runSummary), messages: d.messages.slice(-300),
-      pendingChats, maintenance: this.maintenance.view(),
+      pendingChats, maintenance: this.maintenance.view(), breathing: this.breathing.view(),
       learnedSkills: this.skills.invoke({ action: "list" }),
       observations: d.observations.slice(-200), agent: this.agent.view(), taskService: { url: this.todo.url, error: this.todo.error },
       memoryDir: path.join(this.store.dir, "memory"), stateDir: this.store.dir, error: this.error || "",

@@ -3,11 +3,11 @@ import { LoaderCircle, X, Inbox } from 'lucide-react';
 
 export const Workbench = createContext(null);
 export const useWorkbench = () => useContext(Workbench);
-export async function api(route, body) {
-  const response = await fetch(`/api/${route}`, { method: body === undefined ? 'GET' : 'POST',
+export async function api(route, body, options = {}) {
+  const response = await fetch(`/api/${route}`, { ...options, method: body === undefined ? 'GET' : 'POST',
     headers: { 'X-Cyberboss': 'desktop', 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error || '操作失败');
+  if (!response.ok) throw Object.assign(new Error(data.error || '操作失败'), { status: response.status });
   return data;
 }
 export const tool = (name, args) => api('tool', { name, args });

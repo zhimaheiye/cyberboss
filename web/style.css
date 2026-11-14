@@ -367,4 +367,78 @@ dialog::backdrop { background:#1c2a235c; backdrop-filter:blur(3px); }
   .toast { left:50%; bottom:16px; width:max-content; } .field-pair { gap:10px; } dialog { max-height:calc(100dvh - 30px); }
   .dialog-body { padding:20px; } .input-action { flex-wrap:wrap; } .overview-notice>small { display:none; }
 }
-@media(prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none!important; transition:none!important; scroll-behavior:auto!important; } }
+.breathing-entry { flex-shrink: 0; background: var(--soft); color: var(--accent); }
+.breathing-summary { padding: 0 clamp(18px, 4vw, 42px) 12px; }
+.breathing-summary button { color: var(--accent); background: var(--soft); }
+.breathing-dialog {
+  --breath-ink: #edf5ee;
+  --breath-muted: #a9c1b3;
+  width: min(820px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  color-scheme: dark;
+  color: var(--breath-ink);
+  background: radial-gradient(ellipse at 50% 44%, #243e34, #152620 70%);
+  border-color: #526b5e;
+}
+.breathing-dialog::backdrop { background: #101d18ba; }
+.breathing-layout {
+  min-height: min(630px, calc(100dvh - 36px));
+  padding: clamp(16px, 4vw, 32px);
+  display: grid;
+  grid-template-rows: auto minmax(min-content, 1fr) auto;
+  gap: 14px;
+}
+.breathing-layout:fullscreen {
+  min-height: 100%;
+  overflow: auto;
+  background: radial-gradient(ellipse at 50% 44%, #243e34, #152620 70%);
+}
+.breathing-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.breathing-header h2 { color: var(--breath-muted); font-size: 15px; font-weight: 550; }
+.breathing-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+.breathing-icon, .breathing-button { color: var(--breath-ink); background: #ffffff0a; border-color: #ffffff28; }
+.breathing-icon { padding: 8px; }
+.breathing-icon:hover, .breathing-button:hover, .breathing-button[aria-pressed="true"] { background: #ffffff22; }
+.breathing-primary { background: #c7ddcf; color: #20392e; border-color: #c7ddcf; }
+.breathing-primary:hover { background: #e0efe5; }
+.breathing-stage, .breathing-completion { align-self: center; text-align: center; }
+.breathing-completion { display: grid; justify-items: center; gap: 16px; }
+.breathing-completion h3, .breathing-phase { font-size: clamp(25px, 4vw, 34px); font-weight: 550; }
+.breathing-orbit {
+  display: grid;
+  place-items: center;
+  width: clamp(130px, 32vmin, 254px);
+  aspect-ratio: 1;
+  margin: 0 auto 14px;
+  border: 1px solid #a9d7bd33;
+  border-radius: 50%;
+  padding: 12px;
+}
+.breathing-circle {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  transform: scale(var(--breathing-scale, .76));
+  background: radial-gradient(circle at 38% 31%, #c8e4d0, #7cb798 60%, #4c8a6f);
+  box-shadow: 0 0 36px #8dd8ad36, inset 0 0 16px #eff9f039;
+}
+.breathing-reduced .breathing-circle { transform: scale(.86); }
+.breathing-hint, .breathing-time, .breathing-options summary { color: var(--breath-muted); }
+.breathing-hint, .breathing-time { font-variant-numeric: tabular-nums; }
+.breathing-time { min-height: 20px; margin-top: 5px; font-size: 12px; }
+.breathing-footer { display: grid; justify-items: center; gap: 8px; }
+.breathing-error { color: #ffd4c0; }
+.breathing-options { width: min(100%, 480px); }
+.breathing-options > summary { text-align: center; }
+.breathing-controls { display: flex; flex-wrap: wrap; justify-content: center; align-items: end; gap: 12px; }
+.breathing-controls label { display: grid; gap: 4px; font-size: 13px; }
+.breathing-controls .breathing-motion { display: flex; align-items: center; align-self: end; padding: 9px 0; }
+.breathing-controls select { color: var(--breath-ink); background: #20352d; border-color: #62796b; }
+.breathing-options ul { margin: 4px 0; color: var(--breath-muted); }
+@media(max-width:720px) {
+  .header-actions .notification-button span { display: none; }
+}
+@media(prefers-reduced-motion:reduce) {
+  *,*::before,*::after { animation:none!important; transition:none!important; scroll-behavior:auto!important; }
+  .breathing-circle { transform: scale(.86); }
+}

@@ -28,7 +28,7 @@
 
 [产品说明](PRODUCT.md) · [文档入口](docs/README.md) · [当前交接](docs/handoff/CURRENT.md) · [开发历史](docs/development-history.md) · [备份与隐私](docs/backup-and-privacy.md)
 
-运行数据保存在不入 Git 的 `data/` 下。呼吸引导已形成需求档案，尚未实现。以下保留原微信桥接说明。
+运行数据保存在不入 Git 的 `data/` 下。点击工作台页头的「缓一缓」开始[呼吸练习](docs/features/breathing.md)。
 
 <p align="center">
   <img src="./docs/images/chat-example-1.jpg" alt="Cyberboss 示例对话 1" width="23%" />

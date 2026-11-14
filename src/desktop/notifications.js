@@ -1,6 +1,7 @@
 class Notifications {
-  constructor(store, changed) {
+  constructor(store, changed, breathing) {
     this.store = store; this.changed = changed; this.sending = false;
+    this.breathing = breathing;
     this.ready = import("web-push").then(webpush => {
       this.webpush = webpush;
       store.data.vapid ||= webpush.generateVAPIDKeys(); store.save();
@@ -18,8 +19,10 @@ class Notifications {
     return { subscribed: true };
   }
   add(text, kind = "proactive", metadata = {}) {
+    const session = this.breathing.current();
     const message = this.store.add("messages", { role: "assistant", text, kind, unread: true,
-      pushStatus: "pending", attempts: 0, ...metadata });
+      pushStatus: session ? "deferred" : "pending", attempts: 0, ...metadata,
+      ...(session ? { breathingSessionId: session.id } : {}) });
     this.changed(); return message;
   }
   isQuiet() {
@@ -29,12 +32,13 @@ class Notifications {
     return quietStart < quietEnd ? now >= quietStart && now < quietEnd : now >= quietStart || now < quietEnd;
   }
   async flush() {
-    if (this.sending) return;
+    if (this.sending || this.breathing.current()) return;
     this.sending = true;
     try {
       await this.ready;
       for (const message of this.store.data.messages.filter(m => m.unread && m.pushStatus === "pending"
         && !(m.kind === "proactive" && this.isQuiet()) && (!m.retryAt || Date.parse(m.retryAt) <= Date.now())).slice(0, 5)) {
+        if (this.breathing.current()) break;
         const job = message.jobId ? this.store.data.jobs.find(j => j.id === message.jobId) : null;
         if (job && (job.status !== "active" || Date.parse(job.suppressUntil) > Date.now() || Date.parse(job.activeUntil) < Date.now())) {
           message.pushStatus = "cancelled"; this.store.save(); continue;
@@ -46,6 +50,11 @@ class Notifications {
         const sent = new Set(message.pushAccepted || []);
         let lastError = "";
         for (const subscription of subscriptions.filter(s => !sent.has(s.endpoint))) {
+          if (this.breathing.current()) {
+            message.pushAccepted = [...sent];
+            this.store.save();
+            return;
+          }
           try {
             await this.webpush.sendNotification(subscription, payload, { timeout: 10000, TTL: 86400,
               proxy: process.env.HTTPS_PROXY || process.env.HTTP_PROXY || undefined,

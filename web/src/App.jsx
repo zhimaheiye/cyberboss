@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { LayoutDashboard, CheckSquare, Workflow, MessagesSquare, BookOpen, History, Settings2, Bell, ArrowUpRight, Menu, X, Sparkles, CircleAlert } from 'lucide-react';
+import { LayoutDashboard, CheckSquare, Workflow, MessagesSquare, BookOpen, History, Settings2, Bell, ArrowUpRight, Menu, X, Sparkles, CircleAlert, Wind } from 'lucide-react';
 import Chat from './Chat';
 import Tasks from './Tasks';
 import Jobs from './Jobs';
 import { Memory, Timeline } from './Records';
 import Settings from './Settings';
+import Breathing, { breathingPreferences } from './Breathing';
 import { Workbench, useWorkbench, api, tool, Button, Badge, Dialog, Empty, fmt, titleOf } from './shared';
 import { setupNotifications, notificationLabel, enableNotifications, deliverNotifications } from './notifications';
 
@@ -27,6 +28,7 @@ function App() {
   const [state,setState]=useState(null),[connected,setConnected]=useState(false),[connectionError,setConnectionError]=useState(''),[page,setPage]=useState('overview'),[mobile,setMobile]=useState(false);
   const [tasks,setTasks]=useState([]),[taskLoading,setTaskLoading]=useState(false),[taskError,setTaskError]=useState(''),[includeCompleted,setIncludeCompleted]=useState(false);
   const [draft,setDraft]=useState(''),[notice,setNotice]=useState(null),[historyMessage,setHistoryMessage]=useState(null),[notificationStatus,setNotificationStatus]=useState(notificationLabel());
+  const [breathing, setBreathing] = useState(null), [breathingReminders, setBreathingReminders] = useState(null);
   const snapshot=useRef(null), timer=useRef(), refreshFlight=useRef(null), taskSequence=useRef(0), refreshVersion=useRef(0);
   const toast=useCallback((text,error=false)=>{setNotice({text,error});clearTimeout(timer.current);timer.current=setTimeout(()=>setNotice(null),8000);},[]);
   const refresh=useCallback(async()=>{
@@ -57,13 +59,40 @@ function App() {
     void refresh();const events=new EventSource('/api/events');events.onmessage=()=>void refresh();events.onerror=()=>setConnected(false);
     const onVisible=()=>{if(!document.hidden)void refresh();};document.addEventListener('visibilitychange',onVisible);
     void setupNotifications().then(()=>enablePush()).catch(error=>setNotificationStatus(`提醒未就绪：${error.message}`));
-    const gesture=e=>{if(!e.isTrusted||(e.type==='keydown'&&e.key!=='Enter'))return;if(window.Notification?.permission==='default')void enablePush(true).catch(error=>toast(error.message,true));document.removeEventListener('click',gesture);document.removeEventListener('keydown',gesture);};
+    const gesture=e=>{if(!e.isTrusted||(e.type==='keydown'&&e.key!=='Enter')||snapshot.current?.breathing?.active||e.target.closest?.('.breathing-entry, .breathing-dialog'))return;if(window.Notification?.permission==='default')void enablePush(true).catch(error=>toast(error.message,true));document.removeEventListener('click',gesture);document.removeEventListener('keydown',gesture);};
     document.addEventListener('click',gesture);document.addEventListener('keydown',gesture);
     return()=>{events.close();document.removeEventListener('visibilitychange',onVisible);document.removeEventListener('click',gesture);document.removeEventListener('keydown',gesture);clearTimeout(timer.current);};
   },[refresh,enablePush,toast]);
   useEffect(()=>{if(state)void refreshTasks();},[state?.taskRevision,refreshTasks]);
   useEffect(()=>{if(state?.pushPublicKey)void enablePush().catch(error=>toast(error.message,true));},[state?.pushPublicKey,enablePush,toast]);
   const hasState=!!state;
+  async function startBreathing(event) {
+    const returnFocus = event.currentTarget;
+    const id = crypto.randomUUID(), options = breathingPreferences();
+    try {
+      await api('breathing', { action: 'start', id, ...options }, { signal: AbortSignal.timeout(6000) });
+    } catch (error) {
+      if (!error.status) {
+        void api('breathing', { action: 'finish', id }, { keepalive: true, signal: AbortSignal.timeout(6000) }).catch(() => {});
+      }
+      throw error;
+    }
+    setMobile(false);
+    setBreathing({ id, options, returnFocus });
+    void refresh();
+  }
+  async function showBreathingReminders() {
+    const result = await api('breathing/reminders');
+    if (result.messages.length) {
+      setBreathing(null);
+      setBreathingReminders(result);
+    } else await refresh();
+  }
+  async function dismissBreathingReminders() {
+    await api('breathing', { action: 'dismiss', sessions: breathingReminders.sessions });
+    setBreathingReminders(null);
+    await refresh();
+  }
   useEffect(()=>{
     if(!hasState)return;
     const hash=()=>{const id=new URLSearchParams(location.hash.slice(1)).get('message');if(id)void openMessage(id).catch(e=>toast(e.message,true));else{const name=location.hash.slice(1);if(navigation.some(n=>n[0]===name))setPage(name);}};
@@ -73,11 +102,22 @@ function App() {
   const value={state,connected,refresh,tasks,taskLoading,taskError,includeCompleted,setIncludeCompleted,refreshTasks,go,ask,draft,clearDraft,toast,openMessage,enablePush,notificationStatus};
   const unread=state.messages.filter(m=>m.unread).length;
   return <Workbench.Provider value={value}><div className="app-shell"><aside className={`sidebar ${mobile?'mobile-open':''}`}><a className="brand" href="#overview"><img src="/icon.svg" alt=""/><span>CyberBoss<small>生活工作台</small></span></a><div className="nav-caption">工作空间</div><nav aria-label="工作台导航">{navigation.map(([id,label,Icon])=><button key={id} className={page===id?'active':''} aria-current={page===id?'page':undefined} onClick={()=>go(id)}><Icon size={19}/><span>{label}</span>{id==='chat'&&unread>0&&<b>{unread}</b>}</button>)}</nav><div className="sidebar-foot"><span><i className={`status-dot ${connected?'':'offline'}`}/>{connected?'已连接这台电脑':'连接中断，正在重连'}</span><small>本地保存 · 由你掌控</small></div></aside>
-    {mobile&&<button className="sidebar-backdrop" onClick={()=>setMobile(false)} aria-label="收起导航"/>}<main className={page==='chat'?'main chat-main':'main'}><header className="page-header"><div className="header-heading"><button className="icon-button mobile-menu" onClick={()=>setMobile(!mobile)} aria-label="打开导航"><Menu size={21}/></button><div><div className="eyebrow">{new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric',weekday:'long',timeZone:'Asia/Shanghai'}).format(new Date())}</div><h1>{navigation.find(n=>n[0]===page)?.[1]}</h1></div></div><div className="header-actions"><span className="agent-status"><i className={`status-dot ${state.agent.busy?'working':''}`}/>{state.agent.approvals.length?'等待处理':state.agent.busy?state.agent.background?'后台检查中':'正在回复':'Agent 待命'}</span><Button className="notification-button secondary" onClick={()=>enablePush(true)} title={notificationStatus}><Bell size={16}/><span>{notificationStatus}</span></Button></div></header>
+    {mobile&&<button className="sidebar-backdrop" onClick={()=>setMobile(false)} aria-label="收起导航"/>}<main className={page==='chat'?'main chat-main':'main'}><header className="page-header"><div className="header-heading"><button className="icon-button mobile-menu" onClick={()=>setMobile(!mobile)} aria-label="打开导航"><Menu size={21}/></button><div><div className="eyebrow">{new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric',weekday:'long',timeZone:'Asia/Shanghai'}).format(new Date())}</div><h1>{navigation.find(n=>n[0]===page)?.[1]}</h1></div></div><div className="header-actions"><Button className="secondary breathing-entry" onClick={startBreathing} aria-label="缓一缓" title="缓一缓"><Wind size={17}/>缓一缓</Button><span className="agent-status"><i className={`status-dot ${state.agent.busy?'working':''}`}/>{state.agent.approvals.length?'等待处理':state.agent.busy?state.agent.background?'后台检查中':'正在回复':'Agent 待命'}</span><Button className="notification-button secondary" onClick={()=>enablePush(true)} title={notificationStatus}><Bell size={16}/><span>{notificationStatus}</span></Button></div></header>
       {(!connected||state.error||state.taskService.error)&&<div className="global-alert" role="status"><CircleAlert size={18}/><span>{[!connected&&(connectionError||'连接中断，正在尝试重连。当前草稿不会清空。'),state.error,state.taskService.error].filter(Boolean).join(' · ')}</span></div>}
+      {!breathing && !state.breathing?.active && state.breathing?.reminderCount > 0 && <div className="breathing-summary">
+        <Button onClick={showBreathingReminders}><Bell size={16}/>练习期间有 {state.breathing.reminderCount} 条提醒<ArrowUpRight size={15}/></Button>
+      </div>}
       <Chat active={page==='chat'}/><div className="page-content" hidden={page==='chat'}>{page==='overview'&&<Overview/>}{page==='tasks'&&<Tasks/>}{page==='jobs'&&<Jobs/>}{page==='memory'&&<Memory/>}{page==='timeline'&&<Timeline/>}{page==='settings'&&<Settings/>}</div>
     </main></div>{notice&&<div className={`toast ${notice.error?'error':''}`} role="status"><span>{notice.text}</span><button className="icon-button" aria-label="关闭提示" onClick={()=>setNotice(null)}><X size={16}/></button></div>}
     {historyMessage&&<Dialog title="历史消息" onClose={()=>setHistoryMessage(null)} wide><small>{fmt(historyMessage.createdAt)}</small><p className="preserve-lines">{historyMessage.text}</p><div className="attachments">{(historyMessage.images||[]).map(image=><a key={image.id} href={`/api/chat-image?id=${encodeURIComponent(image.id)}`} target="_blank" rel="noreferrer"><img src={`/api/chat-image?id=${encodeURIComponent(image.id)}`} alt={image.name}/></a>)}</div></Dialog>}
+    {breathingReminders && <Dialog title="练习期间的提醒" onClose={() => setBreathingReminders(null)} wide>
+      {breathingReminders.messages.map(message => <Button key={message.id} className="overview-notice" onClick={async () => {
+        setBreathingReminders(null);
+        await openMessage(message.id);
+      }}><Bell size={16}/><span>{message.text}</span><small>{fmt(message.createdAt)}</small></Button>)}
+      <div className="actions"><Button onClick={dismissBreathingReminders}>收起汇总</Button></div>
+    </Dialog>}
+    {breathing && <Breathing session={breathing} onClose={() => setBreathing(null)} onShowReminders={showBreathingReminders}/>}
   </Workbench.Provider>;
 }
 createRoot(document.getElementById('root')).render(<ErrorBoundary><App/></ErrorBoundary>);

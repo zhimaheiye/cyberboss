@@ -30,8 +30,8 @@ export async function enableNotifications(key, ask = false) {
   try { return await enabling; } finally { enabling = null; }
 }
 export function deliverNotifications(state) {
-  if (!registration?.active || window.Notification?.permission !== 'granted') return;
-  for (const message of state.messages.filter(m => m.unread && m.pushStatus !== 'cancelled' && ['proactive', 'reminder'].includes(m.kind))) {
+  if (state.breathing?.active || !registration?.active || window.Notification?.permission !== 'granted') return;
+  for (const message of state.messages.filter(m => m.unread && !m.breathingSessionId && m.pushStatus !== 'cancelled' && ['proactive', 'reminder'].includes(m.kind))) {
     if (message.kind === 'proactive' && state.quiet) continue;
     const job = state.jobs.find(j => j.id === message.jobId);
     if (job && (job.status !== 'active' || Date.parse(job.suppressUntil) > Date.now() || Date.parse(job.activeUntil) < Date.now() || Date.parse(job.activeFrom) > Date.now())) continue;
