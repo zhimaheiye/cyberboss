@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Maximize, Minimize, X } from 'lucide-react';
 import { api, Button, fmt, useWorkbench } from './shared';
+import { BREATHING_MODES, EQUAL_PACES, breathingTiming } from '../../src/shared/breathing-pattern';
 
 const PREFERENCES = 'cyberboss-breathing-settings';
 const PREPARE_MS = 3000;
@@ -11,7 +12,8 @@ export function breathingPreferences() {
   try { saved = JSON.parse(localStorage.getItem(PREFERENCES)); } catch {}
   return {
     minutes: [1, 2, 5, null].includes(saved?.minutes) ? saved.minutes : 2,
-    pace: [3, 4, 5].includes(saved?.pace) ? saved.pace : 4,
+    mode: BREATHING_MODES.includes(saved?.mode) ? saved.mode : 'extended',
+    pace: EQUAL_PACES.includes(saved?.pace) ? saved.pace : 4,
     reducedMotion: saved?.reducedMotion === true,
   };
 }
@@ -19,6 +21,11 @@ export function breathingPreferences() {
 function elapsedLabel(ms) {
   const seconds = Math.max(0, Math.floor(ms / 1000));
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+function rhythmLabel(options) {
+  const { inhaleSeconds, exhaleSeconds } = breathingTiming(options);
+  return `吸气 ${inhaleSeconds} 秒 · 呼气 ${exhaleSeconds} 秒`;
 }
 
 export default function Breathing({ session, onClose, onShowReminders }) {
@@ -36,8 +43,8 @@ export default function Breathing({ session, onClose, onShowReminders }) {
   const [fullscreen, setFullscreen] = useState(false);
 
   function request(action, extra = {}, keepalive = false) {
-    const { minutes, pace } = options.current;
-    return api('breathing', { action, id: session.id, minutes, pace, activeMs: clock.current.activeMs, ...extra },
+    const { minutes, mode, pace } = options.current;
+    return api('breathing', { action, id: session.id, minutes, mode, pace, activeMs: clock.current.activeMs, ...extra },
       { keepalive, signal: AbortSignal.timeout(6000) });
   }
 
@@ -127,8 +134,10 @@ export default function Breathing({ session, onClose, onShowReminders }) {
       if (!ending.current) {
         const delta = timer.lastFrame === null ? 0 : now - timer.lastFrame;
         timer.lastFrame = now;
-        const { minutes, pace } = options.current;
-        const phaseMs = pace * 1000;
+        const { minutes } = options.current;
+        const { inhaleSeconds, exhaleSeconds } = breathingTiming(options.current);
+        const inhaleMs = inhaleSeconds * 1000, exhaleMs = exhaleSeconds * 1000;
+        const cycleMs = inhaleMs + exhaleMs;
         let phase = '准备', seconds = 0, scale = 0.76;
         if (document.hidden || !document.hasFocus() || timer.manualPause) {
           prepare();
@@ -140,7 +149,7 @@ export default function Breathing({ session, onClose, onShowReminders }) {
           timer.prepareMs = Math.max(0, timer.prepareMs - delta);
           seconds = Math.ceil(timer.prepareMs / 1000);
         } else {
-          const untilEnd = phaseMs * 2 - timer.cycleMs;
+          const untilEnd = cycleMs - timer.cycleMs;
           if (delta >= untilEnd && minutes !== null && timer.activeMs + untilEnd >= minutes * 60000) {
             timer.activeMs += untilEnd;
             void finish('completed');
@@ -148,11 +157,12 @@ export default function Breathing({ session, onClose, onShowReminders }) {
             return;
           }
           timer.activeMs += delta;
-          timer.cycleMs = (timer.cycleMs + delta) % (phaseMs * 2);
-          const inhale = timer.cycleMs < phaseMs;
-          const progress = (timer.cycleMs % phaseMs) / phaseMs;
+          timer.cycleMs = (timer.cycleMs + delta) % cycleMs;
+          const inhale = timer.cycleMs < inhaleMs;
+          const phaseMs = inhale ? inhaleMs : exhaleMs;
+          const progress = (inhale ? timer.cycleMs : timer.cycleMs - inhaleMs) / phaseMs;
           phase = inhale ? '吸气' : '呼气';
-          seconds = Math.ceil((1 - progress) * pace);
+          seconds = Math.ceil((1 - progress) * phaseMs / 1000);
           scale += 0.24 * (1 - Math.cos(Math.PI * (inhale ? progress : 1 - progress))) / 2;
         }
         if (circle.current) circle.current.style.setProperty('--breathing-scale', scale);
@@ -183,7 +193,7 @@ export default function Breathing({ session, onClose, onShowReminders }) {
     options.current = next;
     setSelected(next);
     try { localStorage.setItem(PREFERENCES, JSON.stringify(next)); } catch {}
-    if (change.pace !== undefined) {
+    if (change.mode !== undefined || change.pace !== undefined) {
       Object.assign(clock.current, { cycleMs: 0, prepareMs: PREPARE_MS, lastFrame: null });
     }
   }
@@ -255,6 +265,7 @@ export default function Breathing({ session, onClose, onShowReminders }) {
         </div>
         <footer className="breathing-footer">
           {connectionError && <p role="alert" className="breathing-error">{connectionError}</p>}
+          <p className="breathing-time">{rhythmLabel(selected)} · 不屏息</p>
           <div className="breathing-actions">
             <Button className="breathing-button" disabled={finishing || (display.phase === '已暂停' && !clock.current.manualPause)}
               onClick={togglePause}>{clock.current.manualPause ? '继续' : '暂停'}</Button>
@@ -266,13 +277,16 @@ export default function Breathing({ session, onClose, onShowReminders }) {
               <label>时长<select value={selected.minutes ?? 'open'} onChange={event => changeOptions({
                 minutes: event.target.value === 'open' ? null : Number(event.target.value),
               })}><option value={1}>1 分钟</option><option value={2}>2 分钟</option><option value={5}>5 分钟</option><option value="open">不限时</option></select></label>
-              <label>节奏<select value={selected.pace} onChange={event => changeOptions({ pace: Number(event.target.value) })}>
-                <option value={3}>稍快 · 3 秒</option><option value={4}>舒缓 · 4 秒</option><option value={5}>稍慢 · 5 秒</option></select></label>
+              <label>呼吸模式<select value={selected.mode} disabled={finishing} onChange={event => changeOptions({ mode: event.target.value })}>
+                <option value="extended">延长呼气 · 吸 4 秒 / 呼 6 秒</option><option value="equal">等长吸呼</option></select></label>
+              {selected.mode === 'equal' && <label>等长节奏<select value={selected.pace} disabled={finishing} onChange={event => changeOptions({ pace: Number(event.target.value) })}>
+                <option value={3}>吸 3 秒 / 呼 3 秒</option><option value={4}>吸 4 秒 / 呼 4 秒</option><option value={5}>吸 5 秒 / 呼 5 秒</option></select></label>}
               <label className="breathing-motion"><input type="checkbox" checked={selected.reducedMotion}
                 onChange={event => changeOptions({ reducedMotion: event.target.checked })}/>减弱动效</label>
             </div>
             {state.breathing?.recent.length > 0 && <details><summary>最近练习</summary>
               <ul>{state.breathing.recent.map(item => <li key={item.id}>{fmt(new Date(item.startedAt).toISOString())} · {elapsedLabel(item.activeMs)}
+                {` · ${rhythmLabel(item)}`}
                 {item.feedback ? ` · ${FEEDBACK[item.feedback]}` : ''}</li>)}</ul></details>}
           </details>
         </footer>

@@ -1,6 +1,6 @@
 const LEASE_MS = 150_000;
 const DURATIONS = [1, 2, 5, null];
-const PACES = [3, 4, 5];
+const { BREATHING_MODES, EQUAL_PACES, breathingTiming } = require('../shared/breathing-pattern');
 const FEEDBACK = ["better", "same", "worse"];
 
 class Breathing {
@@ -22,7 +22,8 @@ class Breathing {
 
   complete(session, outcome, endedAt = Date.now()) {
     const { id, startedAt, activeMs, minutes, pace } = session;
-    const record = { id, startedAt, endedAt, activeMs, minutes, pace, outcome };
+    const mode = session.mode || "equal";
+    const record = { id, startedAt, endedAt, activeMs, minutes, mode, pace, ...breathingTiming({ mode, pace }), outcome };
     this.data.current = null;
     this.data.records.push(record);
     this.store.save();
@@ -72,9 +73,13 @@ class Breathing {
       throw new Error("这次练习已结束");
     }
     const now = Date.now();
+    if (body.mode !== undefined && !BREATHING_MODES.includes(body.mode)) throw new Error("呼吸模式无效");
     const session = current || { id, startedAt: now, activeMs: 0 };
     if (DURATIONS.includes(body.minutes)) session.minutes = body.minutes;
-    if (PACES.includes(body.pace)) session.pace = body.pace;
+    if (EQUAL_PACES.includes(body.pace)) session.pace = body.pace;
+    if (body.mode !== undefined) session.mode = body.mode;
+    else if (EQUAL_PACES.includes(body.pace)) session.mode = "equal";
+    session.mode ||= "extended";
     session.minutes = session.minutes === undefined ? 2 : session.minutes;
     session.pace ||= 4;
     if (Number.isFinite(body.activeMs)) {
