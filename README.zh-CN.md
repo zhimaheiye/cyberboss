@@ -30,6 +30,8 @@
 
 运行数据保存在不入 Git 的 `data/` 下。点击工作台页头的「缓一缓」开始[呼吸练习](docs/features/breathing.md)。
 
+侧栏的[答案之书](docs/features/answer-book.md)支持随机翻书、个人句子管理与收藏。通用句库单独下载，句子和收藏仅保存在本机，公开仓库不附带句库。工作台依赖需要 Node 22.18 或更高。
+
 <p align="center">
   <img src="./docs/images/chat-example-1.jpg" alt="Cyberboss 示例对话 1" width="23%" />
   <img src="./docs/images/chat-example-2.jpg" alt="Cyberboss 示例对话 2" width="23%" />

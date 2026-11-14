@@ -10,7 +10,7 @@
     "cyberboss": "./bin/cyberboss.js"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.18.0"
   },
   "scripts": {
     "start": "node ./bin/cyberboss.js start",
@@ -30,6 +30,7 @@
   "dependencies": {
     "@assistant-ui/react": "^0.15.36",
     "@assistant-ui/react-markdown": "^0.14.26",
+    "@gullabs/flipbook-core": "3.2.2",
     "dotenv": "^16.4.7",
     "esbuild": "^0.28.2",
     "lucide-react": "^1.72.0",

@@ -1,4 +1,4 @@
-const CACHE = 'cyberboss-shell-v4';
+const CACHE = 'cyberboss-shell-v5';
 const NOTICES = 'cyberboss-notices-v1';
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(['/', '/app.js', '/style.css', '/icon.svg', '/manifest.webmanifest'])));

@@ -7,10 +7,11 @@ import Jobs from './Jobs';
 import { Memory, Timeline } from './Records';
 import Settings from './Settings';
 import Breathing, { breathingPreferences } from './Breathing';
+import AnswerBook from './AnswerBook';
 import { Workbench, useWorkbench, api, tool, Button, Badge, Dialog, Empty, fmt, titleOf } from './shared';
 import { setupNotifications, notificationLabel, enableNotifications, deliverNotifications } from './notifications';
 
-const navigation=[['overview','今天',LayoutDashboard],['chat','对话与提醒',MessagesSquare],['tasks','待办事项',CheckSquare],['jobs','交给 Agent',Workflow],['memory','记忆',BookOpen],['timeline','生活时间线',History],['settings','设置',Settings2]];
+const navigation=[['overview','今天',LayoutDashboard],['chat','对话与提醒',MessagesSquare],['tasks','待办事项',CheckSquare],['jobs','交给 Agent',Workflow],['memory','记忆',BookOpen],['timeline','生活时间线',History],['answer-book','答案之书',Sparkles],['settings','设置',Settings2]];
 function Overview() {
   const {state,tasks,taskLoading,taskError,go,ask,openMessage}=useWorkbench();const active=state.jobs.filter(j=>j.status==='active'), notices=state.messages.filter(m=>m.unread).slice(-3).reverse();
   return <><section className="welcome"><div><span className="eyebrow">你的生活工作台</span><h2>把心思留给眼前，<br/>其余的，一起记着。</h2><p>待办、提醒与记忆都在这里。你可以亲手安排，也可以交给 Agent。</p><Button className="primary" onClick={()=>ask('看看最近还有什么没做的事情，结合我的待办和托管事项。')}>聊聊今天的安排<ArrowUpRight size={17}/></Button></div><div className="welcome-orbit" aria-hidden="true"><span/><Sparkles size={45}/><span/></div></section>
@@ -107,7 +108,7 @@ function App() {
       {!breathing && !state.breathing?.active && state.breathing?.reminderCount > 0 && <div className="breathing-summary">
         <Button onClick={showBreathingReminders}><Bell size={16}/>练习期间有 {state.breathing.reminderCount} 条提醒<ArrowUpRight size={15}/></Button>
       </div>}
-      <Chat active={page==='chat'}/><div className="page-content" hidden={page==='chat'}>{page==='overview'&&<Overview/>}{page==='tasks'&&<Tasks/>}{page==='jobs'&&<Jobs/>}{page==='memory'&&<Memory/>}{page==='timeline'&&<Timeline/>}{page==='settings'&&<Settings/>}</div>
+      <Chat active={page==='chat'}/><div className="page-content" hidden={page==='chat'}>{page==='overview'&&<Overview/>}{page==='tasks'&&<Tasks/>}{page==='jobs'&&<Jobs/>}{page==='memory'&&<Memory/>}{page==='timeline'&&<Timeline/>}{page==='answer-book'&&<AnswerBook/>}{page==='settings'&&<Settings/>}</div>
     </main></div>{notice&&<div className={`toast ${notice.error?'error':''}`} role="status"><span>{notice.text}</span><button className="icon-button" aria-label="关闭提示" onClick={()=>setNotice(null)}><X size={16}/></button></div>}
     {historyMessage&&<Dialog title="历史消息" onClose={()=>setHistoryMessage(null)} wide><small>{fmt(historyMessage.createdAt)}</small><p className="preserve-lines">{historyMessage.text}</p><div className="attachments">{(historyMessage.images||[]).map(image=><a key={image.id} href={`/api/chat-image?id=${encodeURIComponent(image.id)}`} target="_blank" rel="noreferrer"><img src={`/api/chat-image?id=${encodeURIComponent(image.id)}`} alt={image.name}/></a>)}</div></Dialog>}
     {breathingReminders && <Dialog title="练习期间的提醒" onClose={() => setBreathingReminders(null)} wide>

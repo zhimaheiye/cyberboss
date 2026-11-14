@@ -8,6 +8,7 @@ const { DesktopAgent } = require("./agent");
 const { saveChatImages, removeChatImages, resolveChatAttachments } = require("./chat-images");
 const { Notifications } = require("./notifications");
 const { Breathing } = require("./breathing");
+const { AnswerBook } = require("./answer-book");
 const { Maintenance } = require("./maintenance");
 const { runSummary } = require("./run-progress");
 const { BrowserBridge } = require("./browser");
@@ -24,6 +25,7 @@ class DesktopApp {
     this.browser = new BrowserBridge(this.store, this.maintenance); this.skills = new LearnedSkills(this.store);
     this.tools = new DesktopTools({ store: this.store, jobs: this.jobs, todo: this.todo, maintenance: this.maintenance, browser: this.browser, skills: this.skills });
     this.breathing = new Breathing(this.store, changed);
+    this.answerBook = new AnswerBook(dir);
     this.notifications = new Notifications(this.store, changed, this.breathing);
     this.agent = new DesktopAgent({ config, store: this.store, toolNames: [], changed });
     this.pumping = false; this.stopped = false; this.taskRevision = 0;

@@ -1,3 +1,71 @@
+/* Answer book: the same workspace controls around a paper-and-cloth reading view. */
+.answer-workspace { max-width:1100px; margin:0 auto; }
+.answer-tabs { display:flex; align-items:center; gap:4px; padding:4px; border:1px solid var(--line); border-radius:12px; background:var(--surface); }
+.answer-tabs button { white-space:nowrap; font-size:13px; }
+.answer-reading-room { border:1px solid #e3e4d9; border-radius:20px; background:radial-gradient(ellipse at 50% 25%,#fffdf6 0,#f1f2e9 70%); padding:28px 24px; overflow:hidden; }
+.answer-shelf-label { display:flex; align-items:center; justify-content:center; gap:16px; color:#8a826a; letter-spacing:3px; font-size:10px; }
+.answer-shelf-label span { height:1px; width:40px; background:#c6bea8; }
+.answer-stage { position:relative; max-width:660px; margin:28px auto 22px; }
+.answer-book-scene { width:100%; min-height:178px; }
+.answer-flip { margin:auto; filter:drop-shadow(0 18px 20px #18362620); transition:transform .8s ease; }
+.is-closed .answer-flip,.answer-flip.answer-initial-cover { transform:translateX(-25%); }
+.answer-leaf { background:#fbf7ec; color:#293f34; border:1px solid #e1d9c5; overflow:hidden; }
+.answer-face { height:100%; padding:clamp(14px,3vw,32px); display:flex; flex-direction:column; align-items:center; text-align:center; }
+.answer-running-head { letter-spacing:2px; font-size:10px; color:#8f856f; }
+.answer-page-text { margin:auto 0; padding:16px 0; width:100%; font-family:"Noto Serif SC","Songti SC",SimSun,serif; font-size:clamp(16px,2.2vw,27px); line-height:1.9; white-space:pre-wrap; overflow-wrap:anywhere; max-height:80%; overflow:auto; }
+.answer-folio { color:#a09680; letter-spacing:2px; font-size:10px; }
+.answer-question-page { background:linear-gradient(90deg,#fbf7ec 88%,#e9e2d1); }
+.answer-question-page .answer-page-text { font-size:clamp(12px,1.5vw,17px); color:#8a8271; }
+.answer-result-page { background:linear-gradient(90deg,#e9e2d1,#fffaf0 10%,#fbf7ec); }
+.answer-cover { background:repeating-linear-gradient(93deg,#ffffff03 0 1px,transparent 1px 4px),linear-gradient(110deg,#254b3a,#153e2e); border-color:#123c2b; color:#e8d9ab; }
+.answer-cover .answer-face { margin:7%; height:86%; border:1px solid #bba76a99; outline:1px solid #bba76a44; outline-offset:5px; box-shadow:inset 0 0 32px #00180f33; }
+.answer-cover .answer-running-head,.answer-cover .answer-folio { color:#cbbd91; font-size:clamp(7px,.8vw,10px); }
+.answer-cover .answer-page-text { letter-spacing:.3em; padding-left:.3em; font-size:clamp(22px,3vw,36px); text-shadow:0 1px 1px #0009; }
+.answer-cover-hit { position:absolute; inset:0 25%; border:0; border-radius:0; background:transparent!important; color:transparent; }
+.answer-cover-hit:hover { box-shadow:0 0 0 1px #d8c69280; }
+.answer-cover-hit:disabled { cursor:default; }
+.answer-cover-hit .spin { position:absolute; bottom:16%; color:#e8d9ab; }
+.answer-result-actions { display:flex; justify-content:center; align-items:center; gap:10px; margin:0 auto 22px; }
+.answer-result-accessible { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+.answer-compose { max-width:560px; margin:0 auto; }
+.answer-compose textarea { background:#ffffffb8; border-color:#d9ddcf; }
+.answer-draw-controls { display:flex; gap:16px; align-items:end; margin-top:16px; }
+.answer-draw-controls>.primary { min-width:130px; min-height:44px; }
+.answer-pool-picker { flex:1; color:#7d8174; font-size:12px; }
+.answer-pool-picker span { display:block; margin-bottom:5px; }
+.answer-pool-picker select { background:#ffffffb8; font-size:13px; }
+.answer-storage-note { text-align:center; font-size:11px; color:#8b9183; margin-top:14px; }
+.answer-empty-pool { margin-top:18px; padding:16px; border:1px dashed #c8d2bd; border-radius:10px; text-align:center; }
+.answer-empty-pool p { font-size:13px; color:var(--muted); margin-bottom:10px; }
+.answer-empty-pool .actions { justify-content:center; }
+.answer-source { display:flex; justify-content:space-between; align-items:center; gap:14px; background:var(--soft); border-radius:10px; padding:14px 16px; margin-bottom:16px; }
+.answer-source p { font-size:13px; }
+.answer-sentence { display:flex; align-items:center; gap:16px; padding:16px 0; border-bottom:1px solid var(--line); }
+.answer-sentence>p { flex:1; min-width:0; white-space:pre-wrap; overflow-wrap:anywhere; }
+.answer-sentence.is-disabled>p { color:var(--muted); }
+.answer-enable { display:flex; gap:8px; align-items:center; color:var(--muted); font-size:11px; flex-shrink:0; }
+.answer-enable input { margin:0; }
+.answer-pagination { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:20px; flex-wrap:wrap; font-size:12px; }
+.answer-favorites { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,310px),1fr)); gap:20px; }
+.answer-favorite { background:#fcfaf2; border:1px solid #e6e0d0; border-radius:12px; padding:24px; box-shadow:0 5px 15px #293b2205; }
+.answer-favorite-question { margin-top:16px; font-size:12px; color:#8c8574; white-space:pre-wrap; overflow-wrap:anywhere; }
+.answer-favorite blockquote { margin:24px 0; font-family:"Noto Serif SC",SimSun,serif; font-size:21px; line-height:1.8; white-space:pre-wrap; overflow-wrap:anywhere; }
+.answer-favorite>.actions { justify-content:flex-end; }
+.answer-static { display:flex; width:100%; aspect-ratio:600/410; }
+.answer-static .answer-leaf { width:50%; }
+.is-closed .answer-static { transform:none; justify-content:center; }
+@media(prefers-reduced-motion:reduce) { .answer-flip { transition:none; } }
+@media(max-width:700px) {
+  .answer-reading-room { padding:20px 12px; }
+  .answer-library { padding:16px; }
+  .answer-library .section-heading,.answer-source { flex-wrap:wrap; }
+  .answer-sentence { flex-wrap:wrap; gap:10px; }
+  .answer-sentence .actions { margin-left:auto; }
+  .answer-tabs button { padding:8px 10px; }
+  .answer-draw-controls { gap:10px; }
+  .answer-draw-controls>.primary { min-width:110px; }
+}
+
 /* Shared tokens and primitives: every workspace view uses this design system. */
 :root {
   color-scheme: light;

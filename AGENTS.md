@@ -32,5 +32,6 @@
 | 功能档案 | [功能索引](docs/features/README.md) |
 | 本地工作台与维护机制 | [本地生活工作台](docs/本地生活工作台.md) |
 | 呼吸引导与练习期间的提醒 | [呼吸引导](docs/features/breathing.md) |
+| 答案之书与本机句库 | [答案之书](docs/features/answer-book.md) |
 | 开发阶段与故障修复记录 | [开发历史](docs/development-history.md) |
 | Git 存档、隐私和恢复 | [备份与隐私](docs/backup-and-privacy.md) |

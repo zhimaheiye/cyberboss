@@ -30,6 +30,8 @@ This fork also provides a local PWA workbench for Codex chat, tasks, recurring j
 
 Runtime data stays outside Git under `data/`. Open **缓一缓** from the workbench header to start a [guided breathing session](docs/features/breathing.md).
 
+The sidebar's [Book of Answers](docs/features/answer-book.md) offers random page reveals, editable personal sentences and explicit favorites. Downloaded sentence libraries and favorites stay in local data and are not included in this repository. Workbench dependencies require Node 22.18 or later.
+
 <p align="center">
   <img src="./docs/images/IMG_0241.PNG" alt="Cyberboss English demo 1" width="31%" />
   <img src="./docs/images/IMG_0244.PNG" alt="Cyberboss English demo 2" width="31%" />

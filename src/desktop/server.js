@@ -60,6 +60,7 @@ async function startDesktop(config) {
           req.on("close", () => { clearInterval(heartbeat); clients.delete(res); }); return;
         }
         if (req.method === "GET" && url.pathname === "/api/state") return json(res, 200, app.view());
+        if (req.method === "GET" && url.pathname === "/api/answer-book") return json(res, 200, app.answerBook.view());
         if (req.method === "GET" && url.pathname === "/api/breathing/reminders") return json(res, 200, app.breathing.reminders());
         if (req.method === "GET" && url.pathname === "/api/notifications/display") {
           const message = app.store.data.messages.find(m => m.id === url.searchParams.get("id"));
@@ -77,6 +78,7 @@ async function startDesktop(config) {
         const body = await readBody(req, url.pathname === "/api/chat" ? CHAT_BODY_LIMIT : undefined);
         let result;
         switch (url.pathname) {
+          case "/api/answer-book": return json(res, 200, await app.answerBook.update(body));
           case "/api/chat": result = app.chat(body.text, body.images, body.requestId); break;
           case "/api/maintenance":
             if (["check", "prepare_browser"].includes(body.action) && app.agent.active) throw new Error("Agent 正在执行任务；请让它在任务中自行维护，或等本轮结束后手动操作");
