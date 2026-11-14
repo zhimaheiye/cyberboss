@@ -98,8 +98,13 @@ async function main() {
   installRuntimeErrorHooks();
   const argv = process.argv.slice(2);
   const config = readConfig();
-  ensureBootstrapFiles(config);
   const command = config.mode || "help";
+  if (command === "desktop") {
+    const { startDesktop } = require("./desktop/server");
+    await startDesktop(config);
+    return;
+  }
+  ensureBootstrapFiles(config);
   let app = null;
   const getApp = () => {
     if (!app) {

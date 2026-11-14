@@ -7,3 +7,12 @@ node_modules/
 npm-debug.log*
 third_party/
 firmware/
+/data/
+.env.*
+!.env.example
+/.codex/
+/.cyberboss/
+/docs/private/
+/backups/
+/logs/
+*.log

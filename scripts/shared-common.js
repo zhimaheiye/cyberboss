@@ -126,12 +126,13 @@ async function ensureSharedAppServer() {
 
   ensureLogDir();
   const pidFromFile = readPidFile(appServerPidFile);
-  if (pidFromFile && isPidAlive(pidFromFile) && (await checkReadyz())) {
-    return { pid: pidFromFile, status: "already_running" };
-  }
-
-  if (await checkReadyz()) {
-    return { pid: pidFromFile || 0, status: "already_running_unknown_pid" };
+  const existing = resolveExistingSharedAppServer({
+    pidFromFile,
+    pidAlive: Boolean(pidFromFile && isPidAlive(pidFromFile)),
+    ready: await checkReadyz(),
+  });
+  if (existing) {
+    return existing;
   }
 
   const env = {
@@ -163,6 +164,18 @@ async function ensureSharedAppServer() {
 
   writePidFile(appServerPidFile, pid);
   return { pid, status: "started" };
+}
+
+function resolveExistingSharedAppServer({ pidFromFile = 0, pidAlive = false, ready = false } = {}) {
+  if (pidFromFile && pidAlive && ready) {
+    return { pid: pidFromFile, status: "already_running" };
+  }
+  if (ready) {
+    throw new Error(
+      `port ${port} is already serving an app-server not managed by Cyberboss; stop it or set CYBERBOSS_SHARED_PORT`
+    );
+  }
+  return null;
 }
 
 function ensureBridgeNotRunning() {
@@ -279,6 +292,7 @@ module.exports = {
   readPidFile,
   writePidFile,
   removePidFileIfMatches,
+  resolveExistingSharedAppServer,
   ensureSharedAppServer,
   ensureBridgeNotRunning,
   resolveBoundThread,

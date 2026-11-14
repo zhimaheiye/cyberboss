@@ -1,0 +1,12 @@
+{
+  "id": "/",
+  "name": "CyberBoss · 生活工作台",
+  "short_name": "CyberBoss",
+  "description": "任务、对话、记忆和恰到好处的提醒，都在这台电脑上。",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f6f7f9",
+  "theme_color": "#f6f7f9",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

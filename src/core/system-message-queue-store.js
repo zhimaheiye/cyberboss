@@ -72,6 +72,17 @@ class SystemMessageQueueStore {
     const normalizedAccountId = normalizeText(accountId);
     return this.state.messages.some((message) => message.accountId === normalizedAccountId);
   }
+
+  peekForAccount(accountId) {
+    this.load();
+    return this.state.messages.filter(message => message.accountId === accountId);
+  }
+
+  remove(id) {
+    this.load();
+    this.state.messages = this.state.messages.filter(message => message.id !== id);
+    this.save();
+  }
 }
 
 function normalizeSystemMessage(message) {

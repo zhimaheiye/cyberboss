@@ -47,6 +47,7 @@ function buildSystemInboundText(text, createdAt = "") {
     ...(localTime ? [`[${localTime}]`, ""] : []),
     "SYSTEM ACTION MODE: internal trigger, not user chat.",
     "Do any timeline/diary/reminder/whereabouts work in this turn.",
+    "Do NOT call cyberboss_system_send in this turn. Use the JSON action below to reply instead.",
     "If you act, end with send_message that briefly and naturally reflects what you did or what changed; use silent only if you do nothing.",
     "Return exactly one JSON object after any tool calls:",
     "{\"action\":\"silent\"}",

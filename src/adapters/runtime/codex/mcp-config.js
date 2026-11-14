@@ -35,7 +35,10 @@ function buildCodexMcpConfigArgs(mcpServerConfig) {
     "-c",
     `mcp_servers.${name}.args=${formatTomlArray(args)}`,
   ];
-  for (const toolName of listProjectToolNames()) {
+  if (Number.isFinite(mcpServerConfig.toolTimeoutSeconds) && mcpServerConfig.toolTimeoutSeconds > 0) {
+    configArgs.push("-c", `mcp_servers.${name}.tool_timeout_sec=${mcpServerConfig.toolTimeoutSeconds}`);
+  }
+  for (const toolName of (mcpServerConfig.toolNames || listProjectToolNames())) {
     configArgs.push(
       "-c",
       `mcp_servers.${name}.tools.${toolName}.approval_mode=${quoteTomlString("auto")}`,

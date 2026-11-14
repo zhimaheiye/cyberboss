@@ -58,6 +58,7 @@ class CodexRpcClient {
           env: { ...this.env },
           stdio: ["pipe", "pipe", "pipe"],
           shell: false,
+          windowsHide: true,
         });
         break;
       } catch (error) {
@@ -77,6 +78,7 @@ class CodexRpcClient {
     this.child = child;
     child.on("error", () => {
       this.isReady = false;
+      this.rejectPending(new Error("Codex process failed to start"));
     });
     child.stdout.on("data", (chunk) => {
       this.stdoutBuffer += chunk.toString("utf8");
@@ -91,7 +93,11 @@ class CodexRpcClient {
     });
     child.on("close", () => {
       this.isReady = false;
+      if (this.child === child) this.child = null;
+      this.rejectPending(new Error("Codex process closed"));
     });
+    // Drain stderr so a verbose MCP child cannot fill the pipe and stall Codex.
+    child.stderr.on("data", () => {});
   }
 
   async connectWebSocket() {
@@ -108,6 +114,7 @@ class CodexRpcClient {
       });
       socket.on("close", () => {
         this.isReady = false;
+        this.rejectPending(new Error("Codex connection closed"));
         if (this.socket === socket) {
           this.socket = null;
         }
@@ -211,6 +218,7 @@ class CodexRpcClient {
   }
 
   async close() {
+    this.rejectPending(new Error("Codex client closed"));
     if (this.socket) {
       try {
         this.socket.close();
@@ -220,12 +228,23 @@ class CodexRpcClient {
       this.socket = null;
     }
     if (this.child) {
+      const child = this.child;
+      this.child = null;
       try {
-        this.child.kill();
+        // The Windows command shim can own Codex and MCP descendants. Stop only
+        // this client's process tree, so cancellation cannot leave a run alive.
+        if (IS_WINDOWS && child.pid && child.exitCode === null) {
+          await new Promise((resolve) => {
+            const killer = spawn("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+            const timer = setTimeout(() => { killer.kill(); child.kill(); resolve(); }, 5000);
+            const done = () => { clearTimeout(timer); resolve(); };
+            killer.once("error", () => { child.kill(); done(); });
+            killer.once("close", done);
+          });
+        } else child.kill();
       } catch {
         // best effort
       }
-      this.child = null;
     }
     this.isReady = false;
   }
@@ -234,10 +253,25 @@ class CodexRpcClient {
     const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const payload = JSON.stringify({ id, method, params });
     const responsePromise = new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`Codex RPC timed out: ${method}`));
+      }, 60_000);
+      this.pending.set(id, {
+        resolve: (value) => { clearTimeout(timer); resolve(value); },
+        reject: (error) => { clearTimeout(timer); reject(error); },
+      });
     });
-    this.sendRaw(payload);
+    try { this.sendRaw(payload); } catch (error) {
+      this.pending.get(id)?.reject(error);
+      this.pending.delete(id);
+    }
     return responsePromise;
+  }
+
+  rejectPending(error) {
+    for (const request of this.pending.values()) request.reject(error);
+    this.pending.clear();
   }
 
   async sendNotification(method, params) {
