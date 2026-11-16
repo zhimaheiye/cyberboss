@@ -22,6 +22,7 @@ export default function RetrievalSettings() {
       <Button disabled={!data.config.enabled || data.busy} onClick={() => action({ action: 'index' })}>更新索引</Button><Button disabled={!data.config.enabled || data.busy} onClick={() => action({ action: 'index', force: true })}>全部重新向量化</Button>
       {data.busy && <Button onClick={() => action({ action: 'cancel' })}>停止更新</Button>}</div>
       <p className="hint">{data.busy ? `正在更新：${data.done} / ${data.total} 片段` : `已存 ${data.indexedChunks} 个有效配置下的片段`} · 最近更新 {fmt(data.indexedAt)}</p>
+      {Object.keys(data.chunksBySource || {}).length > 0 && <details><summary>片段来源</summary><div className="source-checkboxes">{Object.entries(data.chunksBySource).map(([source, count]) => <span key={source}>{sourceNames[source] || source}：{count}</span>)}</div><p className="hint">这里统计已保存的向量片段，包含句库等资料；片段数与任务数不同。</p></details>}
       {data.busy && data.total > 0 && <progress value={data.done} max={data.total}/>}{data.error && <p className="alert error">{data.error}</p>}{data.warnings?.map((w, i) => <p className="hint" key={i}>{w}</p>)}
     </>}
   </section>;

@@ -83,6 +83,9 @@ async function startDesktop(config) {
         const body = await readBody(req, url.pathname === "/api/chat" ? CHAT_BODY_LIMIT : undefined);
         let result;
         switch (url.pathname) {
+          case '/api/retention':
+            if (auth) throw new Error('保留策略请在工作台设置页修改');
+            result = app.retention.configure(body); break;
           case '/api/retrieval':
             if (auth) throw new Error('向量接口设置和索引维护请从工作台设置页操作');
             if (body.action === 'save') result = app.retrieval.save(body);

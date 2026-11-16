@@ -3,6 +3,7 @@ import { Plus, Search, Check, RotateCcw, ExternalLink, MessageSquare, CalendarDa
 import { useWorkbench, api, tool, titleOf, descriptionOf, localDate, Button, Badge, Dialog, Form, Field, Empty, openTaskBoard, fmt } from './shared';
 import TaskHistory, { completionAuthor } from './TaskHistory';
 import { Connections } from './Search';
+import { LinkText } from './LocalLinks';
 
 function TaskEditor({ task, close }) {
   const { refreshTasks, toast } = useWorkbench();
@@ -39,7 +40,7 @@ export default function Tasks() {
     {taskLoading && !tasks.length ? <Empty title="正在读取待办…"/> : <div className={view === 'board' ? 'task-board' : 'task-list'}>{groups.filter((_,i)=>includeCompleted || i<2).map(([label,items]) => <section className="task-column" key={label}><h2>{label}<span>{items.length}</span></h2>{items.map(task => <article className={`task-card ${task.completed?'completed':''}`} key={task.id}><div className="task-card-heading"><Button className="task-check" title={task.completed?'重新打开':'完成本次'} aria-label={task.completed?'重新打开':'完成本次'} onClick={async()=>{
       await tool(task.completed?'opentodo_reopen_tasks':'opentodo_complete_tasks',{ids:[task.id],completion_evidence:task.completed?'用户在待办页重新打开':'用户在待办页确认本次完成',...(task.completed?{}:{timezone:'Asia/Shanghai'})}); await refreshTasks(); toast(task.recurrence&&!task.completed?'本期已完成，周期继续保留':'待办状态已更新');
     }}>{task.completed?<RotateCcw size={16}/>:<Check size={16}/>}</Button><Button className="task-title" onClick={async()=>{const {task:detail}=await tool('opentodo_get_task',{id:task.id,timezone:'Asia/Shanghai'});setEditing(detail);}}>{titleOf(task)}</Button></div>
-      {descriptionOf(task) && <p className="line-clamp">{descriptionOf(task)}</p>}
+      {descriptionOf(task) && <p className="line-clamp"><LinkText text={descriptionOf(task)}/></p>}
       {task.completed && <div className="task-completion"><Badge>{completionAuthor(task.completionRecord)}</Badge><small title={task.completed_at}>{fmt(task.completed_at)}</small>
         {task.completionRecord?.actor !== 'user' && <Button onClick={async()=>{await api('tasks/confirm',{taskId:task.id,eventId:task.completionRecord?.id||null,completedAt:task.completed_at});await refresh();await refreshTasks();toast('已记录你的确认');}}>我确认已完成</Button>}</div>}
       <div className="task-card-footer"><small><CalendarDays size={13}/>{task.due?.date || '未安排日期'} {task.due?.time || ''}{task.recurrence?' · 循环':''}</small><Button className="icon-button" title="完成与更正记录" aria-label="完成与更正记录" onClick={()=>setHistoryTask(task)}><History size={15}/></Button><Button className="icon-button" title="聊聊这件事" aria-label="聊聊这件事" onClick={()=>ask(`关于待办「${titleOf(task)}」（任务 ID：${task.id}）：`)}><MessageSquare size={15}/></Button></div>

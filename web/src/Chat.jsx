@@ -3,6 +3,7 @@ import { AssistantRuntimeProvider, useExternalStoreRuntime, useAuiState, ThreadP
 import { MarkdownTextPrimitive } from '@assistant-ui/react-markdown';
 import remarkGfm from 'remark-gfm';
 import RunProgress from './RunProgress';
+import { safeHref, WorkspaceLink, remarkWorkspaceLinks } from './LocalLinks';
 import { ArrowUp, ArrowDown, Paperclip, Square, Copy, X, Sparkles, Bell, LoaderCircle } from 'lucide-react';
 import { api, Button, Form, Field, fmt, labels, useWorkbench, Empty } from './shared';
 
@@ -37,7 +38,7 @@ function ImageAttachment({ removable = false }) {
   </AttachmentPrimitive.Root>;
 }
 const DraftAttachment = () => <ImageAttachment removable/>;
-const Markdown = () => <MarkdownTextPrimitive className="markdown" smooth={false} remarkPlugins={[remarkGfm]} components={{ img: () => null, a: ({ node, ...props }) => <a {...props} target="_blank" rel="noreferrer"/> }}/>;
+const Markdown = () => <MarkdownTextPrimitive className="markdown" smooth={false} remarkPlugins={[remarkGfm, remarkWorkspaceLinks]} urlTransform={safeHref} components={{ img: () => null, a: ({ node, ...props }) => <WorkspaceLink {...props}/> }}/>;
 function Message() {
   const message = useAuiState(s => s.message);
   const user = message.role === 'user', meta = message.metadata.custom || {};
@@ -45,7 +46,7 @@ function Message() {
   return <MessagePrimitive.Root className={`chat-message ${user ? 'from-user' : 'from-agent'} ${meta.kind || ''}`} id={`message-${message.id}`}>
     {!user && <div className="message-avatar">{['proactive','reminder'].includes(meta.kind) ? <Bell size={17}/> : <Sparkles size={17}/>}</div>}
     <div className="message-content"><div className="message-meta"><strong>{name}</strong><time>{fmt(message.createdAt)}</time></div>
-      <div className="message-bubble"><MessagePrimitive.Parts components={user ? {} : { Text: Markdown }}/><div className="attachments"><MessagePrimitive.Attachments components={{ Attachment: ImageAttachment }}/></div>
+      <div className="message-bubble"><MessagePrimitive.Parts components={{ Text: Markdown }}/><div className="attachments"><MessagePrimitive.Attachments components={{ Attachment: ImageAttachment }}/></div>
         {meta.streaming && !message.content.some(p => p.type === 'text' && p.text) && <div className="thinking" role="status"><span/><span/><span/>正在思考…</div>}
       </div>
       {meta.steps?.length > 0 && <details className="steps"><summary>查看执行过程 · {meta.steps.length} 步</summary>{meta.steps.map((step,i) => <div key={i}><span>{step.name}</span><small>{step.status}</small></div>)}</details>}

@@ -14,6 +14,7 @@ const { AnswerBook } = require("./answer-book");
 const { DecisionGuide } = require('./decision-guide');
 const { Toolbox } = require('./toolbox');
 const { Retrieval } = require('./retrieval');
+const { Retention } = require('./retention');
 const { Maintenance } = require("./maintenance");
 const { runSummary } = require("./run-progress");
 const { BrowserBridge } = require("./browser");
@@ -34,9 +35,10 @@ class DesktopApp {
     this.decisionGuide = new DecisionGuide(dir);
     this.toolbox = new Toolbox(this.store);
     this.retrieval = new Retrieval(this, changed);
+    this.retention = new Retention(this);
     this.toolbox.resolve = ref => this.retrieval.sources.read(ref);
     this.tools = new DesktopTools({ store: this.store, jobs: this.jobs, todo: this.todo, taskHistory: this.taskHistory, maintenance: this.maintenance,
-      browser: this.browser, skills: this.skills, toolbox: this.toolbox, retrieval: this.retrieval });
+      browser: this.browser, skills: this.skills, toolbox: this.toolbox, retrieval: this.retrieval, retention: this.retention });
     this.notifications = new Notifications(this.store, changed, this.breathing);
     this.agent = new DesktopAgent({ config, store: this.store, toolNames: [], changed });
     this.pumping = false; this.stopped = false; this.taskRevision = 0;
@@ -62,7 +64,7 @@ class DesktopApp {
       memoryDir: path.join(this.store.dir, "memory"), stateDir: this.store.dir, error: this.error || "",
       pushPublicKey: d.vapid?.publicKey, nextCheckinAt: d.nextCheckinAt, quiet: this.notifications.isQuiet(),
       pending: this.queue.peekForAccount("desktop").length, taskRevision: this.taskRevision, taskHistoryRevision: d.taskEvents.length,
-      toolboxRevision: this.toolbox.revision, indexing: this.retrieval.progress };
+      toolboxRevision: this.toolbox.revision, indexing: this.retrieval.progress, retention: this.retention.view() };
   }
   enqueue(text, { jobId = "", id = crypto.randomUUID(), background = true } = {}) {
     if (background && jobId && (this.agent.active?.run?.jobId === jobId || this.queue.peekForAccount("desktop").some(m => JSON.parse(m.text).jobId === jobId))) return;
@@ -124,6 +126,7 @@ class DesktopApp {
   }
   async tick() {
     if (this.stopped) return;
+    this.retention.tick();
     this.noticeJobExceptions();
     const now = Date.now();
     for (const job of this.jobs.list()) {

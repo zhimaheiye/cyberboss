@@ -39,7 +39,12 @@ class Retrieval {
   config() { return fs.existsSync(this.configFile) ? { ...defaults(), ...JSON.parse(fs.readFileSync(this.configFile, 'utf8')) } : defaults(); }
   view() {
     const c = this.config(), { apiKey, ...publicConfig } = c;
+    const chunksBySource = {};
+    if (signature(c) === this.index.signature) for (const row of Object.values(this.index.rows)) {
+      const source = row.ref.split(':')[0]; chunksBySource[source] = (chunksBySource[source] || 0) + 1;
+    }
     return { config: { ...publicConfig, hasKey: !!apiKey }, sources: SOURCES, ...this.progress,
+      chunksBySource,
       indexedChunks: signature(c) === this.index.signature ? Object.keys(this.index.rows).length : 0,
       indexCompatible: signature(c) === this.index.signature, indexedAt: this.index.updatedAt };
   }
@@ -84,6 +89,14 @@ class Retrieval {
     const [vector] = await this.embed(['连接测试'], c); return { dimensions: vector.length, message: '向量接口已返回有效结果' };
   }
   cancel() { this.paused = true; this.controller?.abort(); }
+  removeRefs(refs) {
+    if (!refs.size) return 0;
+    if (this.progress.busy) throw new Error('索引更新期间暂缓清理');
+    const rows = Object.fromEntries(Object.entries(this.index.rows).filter(([, row]) => !refs.has(row.ref)));
+    const removed = Object.keys(this.index.rows).length - Object.keys(rows).length;
+    if (removed) { const next = { ...this.index, rows, updatedAt: new Date().toISOString() }; writeJson(this.indexFile, next); this.index = next; }
+    return removed;
+  }
   start(force = false, snapshot = null) {
     const c = this.config(); if (!c.enabled) throw new Error('请先启用并保存向量配置');
     if (this.progress.busy) return this.view();

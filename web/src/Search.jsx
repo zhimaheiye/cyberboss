@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Search, Link2, Plus } from 'lucide-react';
 import { useWorkbench, tool, Button, Dialog, Field, Form, Empty, Badge, fmt } from './shared';
+import { LinkText } from './LocalLinks';
 export const sourceNames = { task: '待办', tool: '工具', job: '托管事项', event: '时间线事件', chat: '对话与提醒', note: '笔记',
   decision: '决策分支', reference: '参考笔记', run: '执行摘要', skill: '任务技能', 'task-event': '任务状态记录', answer: '答案句库', favorite: '答案收藏', breathing: '呼吸记录' };
 
@@ -9,7 +10,7 @@ export function SourceViewer({ sourceRef, close, onNavigate }) {
   useEffect(() => { let alive = true; setDoc(null); setError(''); tool('cb_recall', { action: 'read', ref: sourceRef }).then(d => { if (alive) setDoc(d); }).catch(e => { if (alive) setError(e.message); }); return () => { alive = false; }; }, [sourceRef]);
   return <Dialog title={doc?.title || '读取原记录'} onClose={close} wide>{!doc && !error && <p role="status">正在读取原文…</p>}{error && <p className="alert error">{error}</p>}{doc && <>
     <div className="section-heading"><Badge>{sourceNames[doc.source]}</Badge><small>{fmt(doc.date)}</small></div>
-    <div className="source-text">{doc.text}</div>{doc.nextOffset !== null && <Button onClick={async () => {
+    <div className="source-text"><LinkText text={doc.text}/></div>{doc.nextOffset !== null && <Button onClick={async () => {
       const next = await tool('cb_recall', { action: 'read', ref: sourceRef, offset: doc.nextOffset });
       if (next.hash !== doc.hash) throw new Error('原文已更新，请关闭后重新打开');
       setDoc({ ...next, text: doc.text + next.text });
