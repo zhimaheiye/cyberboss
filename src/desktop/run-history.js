@@ -1,12 +1,13 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const readline = require('readline');
 const { recordEvent } = require('./run-progress');
 
 // Read-only recovery for runs created before detailed event recording existed.
 // Do not import model reasoning, user prompts, token records or unrelated turns.
-function readRunHistory(store, run) {
-  if (!run || run.updates?.length || run.steps?.some(step => step.startedAt || step.input || step.output)) return run;
+async function readRunHistory(store, run, refresh = false) {
+  if (!run || (!refresh && run.toolDetails?.length)) return run;
   const threadId = run.threadId || store.data.threadId;
   if (!/^[a-f0-9-]{36}$/i.test(threadId || '')) return run;
   const started = Date.parse(run.createdAt);
@@ -27,8 +28,9 @@ function readRunHistory(store, run) {
   const recovered = { ...run, steps:[], updates:[], detailSource:'codex-session' };
   const calls = new Map();
   for (const file of files) {
-    if (fs.statSync(file).size > 32*1024*1024) return { ...run, detailNote:'原始会话超过读取上限，保留旧版记录；未截取后冒充完整历史。' };
-    for (const line of fs.readFileSync(file,'utf8').split('\n')) {
+    const stream = fs.createReadStream(file, { encoding: 'utf8' });
+    const lines = readline.createInterface({ input: stream, crlfDelay: Infinity });
+    try { for await (const line of lines) {
       let row;try{row=JSON.parse(line);}catch{continue;}
       const at=Date.parse(row.timestamp);if(!Number.isFinite(at)||at<started||at>end||row.type!=='response_item')continue;
       const p=row.payload;
@@ -45,10 +47,11 @@ function readRunHistory(store, run) {
       } else if(p.type==='message'&&p.role==='assistant'&&['commentary','final'].includes(p.channel)) {
         recordEvent(recovered,'item/completed',{item:{type:'agentMessage',id:p.id,text:(p.content||[]).filter(c=>c.type==='output_text').map(c=>c.text).join('\n'),phase:p.channel}},row.timestamp);
       }
-    }
+    } } finally { lines.close(); stream.destroy(); }
   }
-  if(!recovered.steps.length&&!recovered.updates.length)return run;
+  if(!recovered.steps.length&&!recovered.updates.length)return { ...run, detailNote: '未找到本轮原始工具正文；以已保存记录为准。' };
   if(run.status!=='running')for(const step of recovered.steps)if(step.status==='running')step.status='unknown';
+  if (run.updates?.length || run.steps?.length) return { ...run, toolDetails: recovered.steps, detailSource: 'codex-session' };
   return recovered;
 }
 module.exports={readRunHistory};

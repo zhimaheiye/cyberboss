@@ -18,6 +18,8 @@ function resultError(value) {
   const parts = value.content || (Array.isArray(value) ? value : []);
   for (const part of parts) {
     if (!part?.text) continue;
+    const failure = part.text.match(/(?:URL [^\r\n]{1,1200} is not accessible via this tool\.?|Internal Error \(\)|Error fetching[^\r\n]{0,500}|Failed to fetch[^\r\n]{0,500})/i);
+    if (failure) return preview(failure[0], 1200);
     // A shell transport may succeed while the service's JSON body says ok:false.
     for (const line of part.text.split('\n')) {
       try { const parsed = JSON.parse(line); if (parsed?.ok === false || parsed?.isError === true || parsed?.success === false) return preview(parsed.error || parsed, 1200); } catch {}
@@ -91,8 +93,9 @@ function finishProgress(run, status = 'interrupted') {
   touch(run, 'finished', now);
 }
 function runSummary(run) {
-  const { updates, ...summary } = run;
+  const { updates, toolDetails, checkAttempts, ...summary } = run;
   return { ...summary, latestUpdate: updates?.at(-1)?.text?.slice(0, 500),
+    checkAttemptCount: checkAttempts?.length || 0,
     steps: run.steps?.map(({ input, output, ...step }) => ({ ...step, hasDetails: !!(input || output) })) };
 }
 module.exports = { recordEvent, finishProgress, runSummary, preview };

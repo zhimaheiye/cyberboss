@@ -17,6 +17,8 @@ const { Retrieval } = require('./retrieval');
 const { Retention } = require('./retention');
 const { Maintenance } = require("./maintenance");
 const { runSummary } = require("./run-progress");
+const { readRunHistory } = require('./run-history');
+const { assessVerification, deferVerification } = require('./verification');
 const { BrowserBridge } = require("./browser");
 const { LearnedSkills, definitionHash } = require("./learned-skills");
 const { SystemMessageQueueStore } = require("../core/system-message-queue-store");
@@ -72,6 +74,7 @@ class DesktopApp {
     this.queue.enqueue({ id, accountId: "desktop", senderId: "owner", workspaceRoot: this.config.workspaceRoot,
       text: JSON.stringify({ text, jobId, background }), createdAt: new Date().toISOString() });
     this.changed();
+    return true;
   }
   chat(text = "", images = [], requestId) {
     if (requestId && !/^[a-f0-9-]{36}$/i.test(requestId)) throw new Error("消息请求 ID 无效");
@@ -130,18 +133,23 @@ class DesktopApp {
     this.noticeJobExceptions();
     const now = Date.now();
     for (const job of this.jobs.list()) {
-      if (job.status !== "active" || !withinWindow(job) || !job.nextRunAt || Date.parse(job.nextRunAt) > now) continue;
+      if (job.status !== "active" || !withinWindow(job)) continue;
       if (job.suppressUntil && Date.parse(job.suppressUntil) > now) continue;
-      const id = `${job.id}@${job.nextRunAt}`;
+      const regularDue = job.nextRunAt && Date.parse(job.nextRunAt) <= now;
+      const retryDue = job.kind === 'watch' && job.verificationRetry?.at && Date.parse(job.verificationRetry.at) <= now;
+      if (!regularDue && !retryDue) continue;
+      const id = retryDue ? `${job.id}@retry:${job.verificationRetry.sourceRunId}` : `${job.id}@${job.nextRunAt}`;
       if (job.kind === "reminder") {
         if (!this.store.data.messages.some(m => m.triggerId === id)) {
           this.notifications.add(job.notificationText || job.title, "reminder", { jobId: job.id, triggerId: id });
           this.store.add("runs", { jobId: job.id, status: "notified", note: "已进入提醒收件箱；不代表用户已完成" });
         }
       } else {
-        this.enqueue(`${job.instructions}\n\n任务状态（数据）：${JSON.stringify(job)}`, { jobId: job.id, id });
+        const queued = this.enqueue(`${job.instructions}\n\n任务状态（数据）：${JSON.stringify(job)}\n${retryDue ? '上轮核验未完成：请从失败原因继续，换用其他查询方式；完成查询后才可静默。' : ''}`, { jobId: job.id, id });
+        if (!queued) continue;
       }
-      job.nextRunAt = job.schedule.type === "once" ? null : nextRun(job, new Date(now));
+      if (retryDue) job.verificationRetry.at = null;
+      if (regularDue) job.nextRunAt = job.schedule.type === "once" ? null : nextRun(job, new Date(now));
       job.version++; this.store.save();
     }
     const d = this.store.data;
@@ -192,36 +200,58 @@ class DesktopApp {
         const text = input.text || (attachments.length ? "请查看我发来的图片。" : "");
         const reply = await this.agent.run(text, { background: input.background, run, attachments });
         run.finishedAt = new Date().toISOString(); run.status = "completed";
+        // Native web events can omit the response body. Recover public tool outputs for this turn.
+        try {
+          const details = await readRunHistory(this.store, run, true);
+          if (details.toolDetails) { run.toolDetails = details.toolDetails; run.detailSource = details.detailSource; }
+          if (details.detailNote) run.detailNote = details.detailNote;
+        } catch (error) { run.detailNote = `工具正文补录失败：${error.message}`; }
         if (input.background) {
           let action;
           try { action = JSON.parse(reply.trim()); } catch { throw new Error("后台回复未遵守 JSON action 协议，未发送通知；实际动作请检查工具记录"); }
-          if (!["silent", "send_message"].includes(action.action) || action.action === "send_message" && (typeof action.message !== "string" || !action.message.trim())) throw new Error("后台消息格式无效，未发送通知");
+          if (!["silent", "send_message", "retry"].includes(action.action) || action.action === "send_message" && (typeof action.message !== "string" || !action.message.trim())) throw new Error("后台消息格式无效，未发送通知");
           run.action = action.action;
           run.learningOutcome = ["verified", "no_op", "uncertain"].includes(action.learningOutcome) ? action.learningOutcome : "unspecified";
+          const verification = assessVerification(run, job, action);
+          if (verification) run.verification = verification;
+          if (verification?.status === 'incomplete') {
+            deferVerification(job, run);
+            if (!job?.verificationRetry || job.verificationRetry.attempt === 1) {
+              this.notifications.add(`${job?.title || '后台查询'}：本轮核验未完成。${run.note}${run.retryAt ? '\n已安排自动重试，时间见执行记录。' : '\n详情见执行记录。'}`,
+                'proactive', { jobId: input.jobId, runId: run.id, verificationException: true });
+            }
+          } else if (job?.verificationRetry) { delete job.verificationRetry; job.version++; }
           const cooldown = job ? job.minimumGapMinutes : 30;
           const last = job?.lastNotifiedAt || (!job ? this.store.data.lastProactiveAt : null);
           const allowed = !last || Date.now() - Date.parse(last) >= cooldown * 60000;
           const needsHandoff = job?.status === 'blocked' && job.blocker?.sourceRunId === run.id;
           if (action.action === "send_message" && (allowed || needsHandoff) && (!job || (job.status === "active" || needsHandoff) && withinWindow(job) && !(Date.parse(job.suppressUntil) > Date.now()))) {
-            this.notifications.add(action.message, "proactive", { jobId: input.jobId, ...(needsHandoff ? { jobException: true, runId: run.id } : {}) });
+            this.notifications.add(action.message, "proactive", { jobId: input.jobId, runId: run.id, ...(needsHandoff ? { jobException: true } : {}) });
             if (job) job.lastNotifiedAt = new Date().toISOString();
             this.store.data.lastProactiveAt = new Date().toISOString();
           } else if (needsHandoff) {
             this.notifications.add(`${job.title}：${job.blocker.evidence}\n${job.blocker.nextAction}`, 'proactive', { jobId: job.id, jobException: true, runId: run.id });
-          } else if (action.action === "send_message") run.note = "消息被静默状态或提醒冷却阻止";
+          } else if (action.action === "send_message") run.note = [run.note, "消息被静默状态或提醒冷却阻止"].filter(Boolean).join('\n');
         } else this.store.add("messages", { role: "assistant", text: reply, kind: "chat", unread: false });
-        if (job) { job.lastRunAt = run.finishedAt; job.lastError = job.status === 'blocked' ? job.blocker?.evidence || job.lastError : ""; }
+        if (job) { job.lastRunAt = run.finishedAt; job.lastError = job.status === 'blocked' ? job.blocker?.evidence || job.lastError : run.status === 'incomplete' ? run.note : ""; }
       } catch (error) {
         run.status = run.cancelRequested ? "cancelled" : "failed";
         run.error = error.message; run.finishedAt = new Date().toISOString();
-        if (job) { if (job.status === "active") job.status = "blocked"; job.lastError = error.message; job.version++; }
+        if (job?.kind === 'watch' && run.cancelRequested) {
+          delete job.verificationRetry; job.lastError = ''; job.version++;
+        }
+        else if (job?.kind === 'watch' && job.status === 'active') {
+          run.verification = { status: 'incomplete', summary: error.message, evidence: [], recordedAt: run.finishedAt };
+          deferVerification(job, run); job.lastRunAt = run.finishedAt; job.lastError = error.message;
+        }
+        else if (job) { if (job.status === "active") job.status = "blocked"; job.lastError = error.message; job.version++; }
         else if (input.background) {
           this.store.data.settings.checkinEnabled = false;
           this.error = `自动唤醒已暂停：${error.message}`;
         }
         if (!input.background) this.store.add("messages", { role: "system", kind: "error", text: error.message });
-        else if (!run.cancelRequested) this.notifications.add(
-          `${job ? job.title : '自然唤醒'}本轮未完成：${error.message}${job?.status === 'blocked' ? '\n后续运行已暂停，详情见「交给 Agent」的执行记录。' : ''}`,
+        else if (!run.cancelRequested && (!run.retryAt || job.verificationRetry.attempt === 1)) this.notifications.add(
+          `${job ? job.title : '自然唤醒'}本轮未完成：${error.message}${run.retryAt ? '\n已安排自动重试，时间见执行记录。' : job?.status === 'blocked' ? '\n后续运行已暂停，详情见「交给 Agent」的执行记录。' : ''}`,
           'proactive', { jobId: input.jobId, jobException: true, runId: run.id });
       }
       try { this.skills.finish(run, run.learningOutcome); }

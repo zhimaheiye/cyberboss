@@ -11,7 +11,7 @@ export async function api(route, body, options = {}) {
   return data;
 }
 export const tool = (name, args) => api('tool', { name, args });
-export const labels = { reminder:'到点提醒', watch:'信息监控', operation:'后台作业', opportunity:'机会式事项', active:'已启用', draft:'待接管', paused:'已暂停', blocked:'需要处理', done:'已结束', completed:'已完成', failed:'失败', interrupted:'中断', cancelled:'已取消', running:'执行中', yielded:'等待后续返回', unknown:'结果未确认', notified:'已入提醒箱', acknowledged:'已确认处理', user:'你的自述', observed:'设备观察', inferred:'推断' };
+export const labels = { reminder:'到点提醒', watch:'信息监控', operation:'后台作业', opportunity:'机会式事项', active:'已启用', draft:'待接管', paused:'已暂停', blocked:'需要处理', done:'已结束', completed:'已完成', incomplete:'核验未完成', inconclusive:'尚未确认', succeeded:'已核实', failed:'失败', interrupted:'中断', cancelled:'已取消', running:'执行中', yielded:'等待后续返回', unknown:'结果未确认', notified:'已入提醒箱', acknowledged:'已确认处理', user:'你的自述', observed:'设备观察', inferred:'推断' };
 export function fmt(value) { return value && Number.isFinite(Date.parse(value)) ? new Intl.DateTimeFormat('zh-CN', { timeZone:'Asia/Shanghai', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hourCycle:'h23' }).format(new Date(value)) : '—'; }
 export function localDate(value = new Date()) { const parts = new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Shanghai', year:'numeric', month:'2-digit', day:'2-digit' }).formatToParts(new Date(value)); return ['year','month','day'].map(k => parts.find(p => p.type === k).value).join('-'); }
 export const titleOf = t => t.untrusted_text?.title || t.title || '未命名待办';

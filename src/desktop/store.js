@@ -25,7 +25,11 @@ class DesktopStore {
       run.error = "进程退出，执行结果尚未确认；请检查记录后再运行。";
       require("./run-progress").finishProgress(run);
       const job = this.data.jobs.find(j => j.id === run.jobId);
-      if (job) { if (job.status === "active") job.status = "blocked"; job.lastError = run.error; }
+      if (job?.kind === 'watch' && job.status === 'active') {
+        run.verification = { status: 'incomplete', summary: '进程退出，信息核验中断；稍后重新查询', evidence: [] };
+        require('./verification').deferVerification(job, run);
+        job.lastError = run.verification.summary;
+      } else if (job) { if (job.status === "active") job.status = "blocked"; job.lastError = run.error; }
     }
     this.save();
   }

@@ -62,6 +62,9 @@ class JobService {
     const calculated = nextRun(job);
     const changed = !existing || JSON.stringify(existing.schedule) !== JSON.stringify(job.schedule) || existing.timezone !== job.timezone || existing.status !== job.status;
     job.nextRunAt = changed ? calculated : existing.nextRunAt;
+    if (existing?.verificationRetry && (job.kind !== 'watch' || job.status === 'done')) {
+      delete job.verificationRetry; delete existing.verificationRetry;
+    }
     if (existing) Object.assign(existing, job); else this.list().push(job);
     if (existing && previousStatus !== job.status) {
       this.store.data.taskEvents ||= [];

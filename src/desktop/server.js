@@ -73,7 +73,7 @@ async function startDesktop(config) {
         }
         if (req.method === "GET" && url.pathname === "/api/run") {
           const run = app.store.data.runs.find(run => run.id === url.searchParams.get("id"));
-          return json(res, 200, readRunHistory(app.store, run) || null);
+          return json(res, 200, await readRunHistory(app.store, run) || null);
         }
         if (req.method === "GET" && url.pathname === "/api/message") return json(res, 200, app.store.data.messages.find(m => m.id === url.searchParams.get("id")) || null);
         if (req.method === "GET" && url.pathname === "/api/tools") return json(res, 200, app.tools.listTools());

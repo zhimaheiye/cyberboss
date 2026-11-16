@@ -71,13 +71,20 @@
 
 ## 过程可见与最终通知
 
+- 信息监控（watch）必须完成来源核验后才能报告 complete/no_op。搜索无结果、网页无法访问、空白、正文过期、年份／区服不匹配，均不能证明没有待提醒事项。用户明确知道有结果时，把它作为需要追查的线索，扩大渠道核对，不能重复同一组搜词后停止。
+- 每次查询失败或结果不足，立即用 cb_verification 记录 method、target、status=failed/inconclusive、detail（具体错误／缺口），随后切换实际方式：换关键词和来源、移除无关 URL 参数重新直读、直接 HTTP、已登录浏览器。搜索摘要只是线索；读活动正文、更新、图片及相关评论，核对发布年份、版本、有效期和已核销值。不要只检查一个活动就断言全局没有。不同渠道的可用信息按任务手册的来源规则交叉验证。
+- 成功的替代核查也调用 cb_verification，status=succeeded，detail 保存具体事实与来源。最终 verification.recovery 说明此前每个关键缺口如何被哪个来源解决；无解决依据时 status=incomplete。记录操作与证据，不记录私有推理。
+- 当前回合已尝试可用替代方式仍未查明时返回 action=retry、learningOutcome=uncertain、verification.status=incomplete，summary 写明卡点，evidence 列出已查来源。工作台将本轮标记“核验未完成”；active 的 watch 作业自动按 15/60/180/360 分钟退避重试（重试间隔上限为 6 小时），原周期保留；原周期先到时可提前核查。用户暂停、阻塞、静默和有效窗口仍生效。不要为了重试把任务设为 blocked；有副作用的操作仍须先核对结果。
+- watch 最终回复必须附 verification={status:"complete"|"incomplete",summary:"查到了什么、仍缺什么",evidence:["来源 URL／具体记录及核验事实"],recovery:"如有失败，替代方式及解决依据"}。缺少结论或证据会被系统归为未完成并重试。可以在部分核验未完成时 send_message 提醒已经确认有效的事项，同时保留未完成状态；不要将未确认的信息写成已核实。收到提醒与实际核销分别判断，只有用户明确确认的对象才移出待提醒范围。
+
 - 开始阶段、变更方法、遇到阻碍时，可以用 commentary 简短说明“正在做什么／为什么等待”。这些说明只进入本地执行详情，不发送桌面通知；不输出私有推理。
 - 后台最终回复仍只能是 JSON。可额外附上 learningOutcome: verified（已通过实际结果核验）、no_op（当前无需动作）、uncertain（结果不确定）。仅有静默输出不自动确认技能可靠。例如 {"action":"silent","learningOutcome":"verified"}。
 
 后台触发时可以检索、整理记忆、检查任务或执行获授权的工作，然后保持静默。
 只有存在值得告诉用户的新情况、到期事项或需要用户处理的问题，才发主动消息。
-每次后台回合最终回复只输出以下两种 JSON 之一，不输出 Markdown 围栏；过程说明使用 commentary：
+每次后台回合最终回复只输出 JSON，不输出 Markdown 围栏；过程说明使用 commentary。watch 必须带上述 verification 字段：
 {"action":"silent"}
 {"action":"send_message","message":"简洁自然、具体有用的提醒"}
+{"action":"retry","learningOutcome":"uncertain","verification":{"status":"incomplete","summary":"已尝试的方式与仍未解决的具体障碍","evidence":["已读取的来源"]}}
 界面会区分执行记录与真正的主动消息。不要用“检查完成”充当主动消息。
 主动消息发出不等于用户已经看见，更不等于用户已完成任务。

@@ -92,7 +92,7 @@ class DesktopAgent {
       const context = {
         now: new Date().toISOString(), timezone: "Asia/Shanghai", mode: background ? "background" : "chat",
         browserMaintenance: this.store.data.maintenance?.policy,
-        currentRun: run ? { id: run.id, jobId: run.jobId, reusableSkillVersion: run.skillVersion } : null,
+        currentRun: run ? { id: run.id, jobId: run.jobId, kind: this.store.data.jobs.find(j => j.id === run.jobId)?.kind, reusableSkillVersion: run.skillVersion } : null,
         recentMessages: this.store.data.messages.slice(-16).map(m => ({ role: m.role, text: m.text })),
         activeJobs: this.store.data.jobs.filter(j => j.status === "active"
           && !(Date.parse(j.suppressUntil) > Date.now()) && !(Date.parse(j.activeFrom) > Date.now()) && !(Date.parse(j.activeUntil) < Date.now())).map(j => ({
@@ -173,7 +173,10 @@ class DesktopAgent {
     if (this.active?.run) { this.active.run.progress = { phase: this.approvals.length ? "approval" : "model", lastEventAt: new Date().toISOString() }; this.saveProgress(); }
   }
   async cancel() {
-    if (this.active) this.active.fail(new Error("用户已停止本次执行；已发生的动作请从记录核对"));
+    if (this.active) {
+      if (this.active.run) this.active.run.cancelRequested = true;
+      this.active.fail(new Error("用户已停止本次执行；已发生的动作请从记录核对"));
+    }
     await this.rpc?.close(); this.rpc = null;
   }
   view() {
