@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { RefreshCw, ExternalLink, ShieldCheck, MonitorCog, Folder } from 'lucide-react';
 import { useWorkbench, api, Button, Form, Field, Badge, fmt, Empty } from './shared';
+import RetrievalSettings from './RetrievalSettings';
 
 export default function Settings() {
   const {state,refresh,toast,notificationStatus,enablePush}=useWorkbench();
@@ -22,6 +23,7 @@ export default function Settings() {
       <div className="maintenance-records">{maintenance?.records.length?maintenance.records.slice().reverse().map(r=><details key={r.id}><summary><Badge value={r.status}/><span>{r.action==='prepare_browser'?'浏览器准备':r.action==='diagnose'?'连接诊断':'检查更新'}</span><small>{fmt(r.createdAt)}</small></summary><p>{r.error||r.note||'正在处理…'}</p><pre>{r.steps.map(s=>`${s.at?fmt(s.at)+' ':''}${s.command}\n${s.output}`).join('\n\n')}</pre>{r.browserHost&&<details><summary>本机浏览器诊断</summary><pre>{JSON.stringify(r.browserHost,null,2)}</pre></details>}{r.recovery?.state==='needs_diagnosis'&&<p className="hint">仍需 Agent 继续排查；当前连接状态不能证明需要人工处理。</p>}</details>):<p className="muted">工作台触发的维护记录会显示在这里。</p>}</div>
     </section>
     <section className="panel"><h2>账户</h2><p>使用本机 Codex 的官方 ChatGPT 订阅登录。</p><Button onClick={async()=>{const result=await api('login',{});const url=new URL(result.authUrl);if(url.protocol!=='https:')throw new Error('登录地址异常');setAuthUrl(url.href);}}>打开官方登录</Button>{authUrl&&<a className="login-link" href={authUrl} target="_blank" rel="noreferrer">继续登录 <ExternalLink size={15}/></a>}</section>
-    <section className="panel"><h2><Folder size={19}/>本机数据</h2><dl><dt>数据目录</dt><dd>{state.stateDir}</dd><dt>记忆文件</dt><dd>{state.memoryDir}</dd><dt>下次自然唤醒</dt><dd>{fmt(state.nextCheckinAt)}</dd></dl><p className="hint">记忆使用本地 Markdown 与关键词检索，向量模型配置尚未启用。</p></section>
+    <RetrievalSettings/>
+    <section className="panel"><h2><Folder size={19}/>本机数据</h2><dl><dt>数据目录</dt><dd>{state.stateDir}</dd><dt>笔记文件</dt><dd>{state.memoryDir}</dd><dt>下次自然唤醒</dt><dd>{fmt(state.nextCheckinAt)}</dd></dl><p className="hint">内容按原用途保存，统一检索直接读取各功能的数据。向量配置和派生索引在数据目录的 search 子目录。</p></section>
   </div>;
 }

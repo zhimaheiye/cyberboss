@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import { Plus, Search, Check, RotateCcw, ExternalLink, MessageSquare, CalendarDays, RefreshCw, History } from 'lucide-react';
 import { useWorkbench, api, tool, titleOf, descriptionOf, localDate, Button, Badge, Dialog, Form, Field, Empty, openTaskBoard, fmt } from './shared';
 import TaskHistory, { completionAuthor } from './TaskHistory';
+import { Connections } from './Search';
 
 function TaskEditor({ task, close }) {
   const { refreshTasks, toast } = useWorkbench();
@@ -14,9 +15,9 @@ function TaskEditor({ task, close }) {
       catch (error) { throw new Error(`标题和说明已保存，日期未更新：${error.message}`); }
     }
     await refreshTasks(); toast('待办已保存'); close();
-  }}><Field label="标题" name="title" defaultValue={titleOf(task)} required maxLength={300}/><Field label="说明"><textarea name="description" rows={5} defaultValue={descriptionOf(task)}/></Field>
+  }}><Field label="标题" name="title" defaultValue={titleOf(task)} required maxLength={300}/><Field label="任务说明 · 背景、目标与完成条件"><textarea name="description" rows={7} placeholder="想解决什么、已有资料、限制，以及做到什么程度算完成…" defaultValue={descriptionOf(task)}/></Field>
     <div className="field-pair"><Field label="日期" name="date" type="date" defaultValue={task.due?.date || ''}/><Field label="时间（北京时间）" name="time" type="time" defaultValue={task.due?.time || ''}/></div>
-    {task.recurrence && <p className="muted">周期：{task.recurrence}</p>}<p className="muted">更多周期、项目和日历设置可以在完整看板里管理。</p></Form><h3>完成与更正记录</h3><TaskHistory taskId={task.id}/></Dialog>;
+    {task.recurrence && <p className="muted">周期：{task.recurrence}</p>}<p className="muted">更多周期、项目和日历设置可以在完整看板里管理。</p></Form><Connections sourceRef={`task:${task.id}`} title={titleOf(task)} onChat={close}/><h3>完成与更正记录</h3><TaskHistory taskId={task.id}/></Dialog>;
 }
 export default function Tasks() {
   const { tasks, hiddenTaskCount, taskError, taskLoading, includeCompleted, setIncludeCompleted, refreshTasks, refresh, go, ask, toast } = useWorkbench();

@@ -60,6 +60,7 @@ async function startDesktop(config) {
           req.on("close", () => { clearInterval(heartbeat); clients.delete(res); }); return;
         }
         if (req.method === "GET" && url.pathname === "/api/state") return json(res, 200, app.view());
+        if (req.method === 'GET' && url.pathname === '/api/retrieval') return json(res, 200, app.retrieval.view());
         if (req.method === "GET" && url.pathname === "/api/answer-book") return json(res, 200, app.answerBook.view());
         if (req.method === 'GET' && url.pathname === '/api/decision-guide') return json(res, 200, app.decisionGuide.view());
         if (req.method === 'GET' && url.pathname === '/api/decision-guide/reference') return json(res, 200, app.decisionGuide.reference(url.searchParams.get('name')));
@@ -82,6 +83,14 @@ async function startDesktop(config) {
         const body = await readBody(req, url.pathname === "/api/chat" ? CHAT_BODY_LIMIT : undefined);
         let result;
         switch (url.pathname) {
+          case '/api/retrieval':
+            if (auth) throw new Error('向量接口设置和索引维护请从工作台设置页操作');
+            if (body.action === 'save') result = app.retrieval.save(body);
+            else if (body.action === 'test') result = await app.retrieval.test();
+            else if (body.action === 'index') result = app.retrieval.start(body.force === true);
+            else if (body.action === 'cancel') { app.retrieval.cancel(); result = { stopping: true }; }
+            else throw new Error('未知索引操作');
+            break;
           case "/api/answer-book": return json(res, 200, await app.answerBook.update(body));
           case '/api/decision-guide': return json(res, 200, app.decisionGuide.save(body));
           case "/api/chat": result = app.chat(body.text, body.images, body.requestId); break;
@@ -103,7 +112,7 @@ async function startDesktop(config) {
           case "/api/tool":
             try { result = await app.tools.invokeTool(body.name, body.args, auth ? 'agent' : 'user'); }
             finally {
-              if (body.name?.startsWith("opentodo_") && !/^opentodo_(list|get|search|today)_/.test(body.name)) { app.taskRevision++; changed(); }
+              if (body.name?.startsWith("opentodo_") && !/^opentodo_(list|get|search|today)_/.test(body.name)) { app.taskRevision++; app.retrieval.sources.invalidateTasks(); changed(); }
             }
             break;
           case "/api/tasks/confirm":
@@ -128,7 +137,7 @@ async function startDesktop(config) {
           default: return json(res, 404, { error: "没有此接口" });
         }
         const readOnlyTool = url.pathname === "/api/tool" && (
-          /^opentodo_(list|get|search|today)_/.test(body.name || "") || ["list", "get", "read", "search"].includes(body.args?.action));
+          /^opentodo_(list|get|search|today)_/.test(body.name || "") || ["list", "get", "read", "search", "related", "status"].includes(body.args?.action));
         if (!readOnlyTool) changed();
         return json(res, 200, result ?? { ok: true });
       }

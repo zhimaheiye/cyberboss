@@ -552,3 +552,21 @@ dialog::backdrop { background:#1c2a235c; backdrop-filter:blur(3px); }
 .decision-remove { border-top: 1px solid var(--line); margin-top: 24px; padding-top: 16px; }
 .decision-reference { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.9; }
 @media (max-width: 700px) { .decision-editor { grid-template-columns: 1fr; } .decision-node-list { max-height: 240px; overflow: auto; } }
+
+/* Search, tools and their links share the workspace's cards and source views. */
+.source-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.9; padding: 18px 0; }
+.search-results { display: grid; gap: 14px; margin: 18px 0; }
+.search-results .panel { margin: 0; padding: 20px; }
+.search-results h3 { margin: 10px 0; overflow-wrap: anywhere; }
+.source-excerpt { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; color: var(--muted); margin-bottom: 12px; }
+.search-results .actions { margin-top: 14px; }
+.connections { margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--line); }
+.connections > .hint { margin: 16px 0; }
+.connection-card { border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-top: 16px; }
+.connection-card .section-heading { flex-wrap: wrap; gap: 10px; }
+.connection-card p { margin: 10px 0; }
+.connection-card .actions { margin-top: 12px; }
+.connection-history { margin-top: 12px; font-size: 12px; color: var(--muted); }
+.connection-history span { display: block; white-space: pre-wrap; overflow-wrap: anywhere; }
+.source-checkboxes { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 9px; }
+.settings-wide progress { width: 100%; height: 10px; accent-color: var(--accent); }

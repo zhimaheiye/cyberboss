@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { LayoutDashboard, CheckSquare, Workflow, MessagesSquare, BookOpen, History, Settings2, Bell, ArrowUpRight, Menu, X, Sparkles, CircleAlert, Wind, GitBranch } from 'lucide-react';
+import { LayoutDashboard, CheckSquare, Workflow, MessagesSquare, BookOpen, History, Settings2, Bell, ArrowUpRight, Menu, X, Sparkles, CircleAlert, Wind, GitBranch, Wrench, Search } from 'lucide-react';
 import Chat from './Chat';
 import Tasks from './Tasks';
 import Jobs from './Jobs';
@@ -9,10 +9,12 @@ import Settings from './Settings';
 import Breathing, { breathingPreferences } from './Breathing';
 import AnswerBook from './AnswerBook';
 import DecisionGuide from './DecisionGuide';
+import Toolbox from './Toolbox';
+import { SearchDialog } from './Search';
 import { Workbench, useWorkbench, api, tool, Button, Badge, Dialog, Empty, fmt, titleOf } from './shared';
 import { setupNotifications, notificationLabel, enableNotifications, deliverNotifications } from './notifications';
 
-const navigation=[['overview','今天',LayoutDashboard],['chat','对话与提醒',MessagesSquare],['tasks','待办事项',CheckSquare],['jobs','交给 Agent',Workflow],['decisions','减少决策',GitBranch],['memory','记忆',BookOpen],['timeline','生活时间线',History],['answer-book','答案之书',Sparkles],['settings','设置',Settings2]];
+const navigation=[['overview','今天',LayoutDashboard],['chat','对话与提醒',MessagesSquare],['tasks','待办事项',CheckSquare],['tools','工具箱',Wrench],['jobs','交给 Agent',Workflow],['decisions','减少决策',GitBranch],['memory','笔记',BookOpen],['timeline','生活时间线',History],['answer-book','答案之书',Sparkles],['settings','设置',Settings2]];
 function Overview() {
   const {state,tasks,taskLoading,taskError,go,ask,openMessage}=useWorkbench();const active=state.jobs.filter(j=>j.status==='active'), notices=state.messages.filter(m=>m.unread).slice(-3).reverse();
   return <><section className="welcome"><div><span className="eyebrow">你的生活工作台</span><h2>把心思留给眼前，<br/>其余的，一起记着。</h2><p>待办、提醒与记忆都在这里。你可以亲手安排，也可以交给 Agent。</p><Button className="primary" onClick={()=>ask('看看最近还有什么没做的事情，结合我的待办和托管事项。')}>聊聊今天的安排<ArrowUpRight size={17}/></Button></div><div className="welcome-orbit" aria-hidden="true"><span/><Sparkles size={45}/><span/></div></section>
@@ -31,6 +33,7 @@ function App() {
   const [tasks,setTasks]=useState([]),[taskLoading,setTaskLoading]=useState(false),[taskError,setTaskError]=useState(''),[includeCompleted,setIncludeCompleted]=useState(false);
   const [draft,setDraft]=useState(''),[notice,setNotice]=useState(null),[historyMessage,setHistoryMessage]=useState(null),[notificationStatus,setNotificationStatus]=useState(notificationLabel());
   const [breathing, setBreathing] = useState(null), [breathingReminders, setBreathingReminders] = useState(null);
+  const [searching, setSearching] = useState(false);
   const snapshot=useRef(null), timer=useRef(), refreshFlight=useRef(null), taskSequence=useRef(0), refreshVersion=useRef(0);
   const toast=useCallback((text,error=false)=>{setNotice({text,error});clearTimeout(timer.current);timer.current=setTimeout(()=>setNotice(null),8000);},[]);
   const refresh=useCallback(async()=>{
@@ -108,14 +111,15 @@ function App() {
   const value={state,connected,refresh,tasks:visibleTasks,hiddenTaskCount:tasks.length-visibleTasks.length,taskLoading,taskError,includeCompleted,setIncludeCompleted,refreshTasks,go,ask,draft,clearDraft,toast,openMessage,enablePush,notificationStatus};
   const unread=state.messages.filter(m=>m.unread).length;
   return <Workbench.Provider value={value}><div className="app-shell"><aside className={`sidebar ${mobile?'mobile-open':''}`}><a className="brand" href="#overview"><img src="/icon.svg" alt=""/><span>CyberBoss<small>生活工作台</small></span></a><div className="nav-caption">工作空间</div><nav aria-label="工作台导航">{navigation.map(([id,label,Icon])=><button key={id} className={page===id?'active':''} aria-current={page===id?'page':undefined} onClick={()=>go(id)}><Icon size={19}/><span>{label}</span>{id==='chat'&&unread>0&&<b>{unread}</b>}</button>)}</nav><div className="sidebar-foot"><span><i className={`status-dot ${connected?'':'offline'}`}/>{connected?'已连接这台电脑':'连接中断，正在重连'}</span><small>本地保存 · 由你掌控</small></div></aside>
-    {mobile&&<button className="sidebar-backdrop" onClick={()=>setMobile(false)} aria-label="收起导航"/>}<main className={page==='chat'?'main chat-main':'main'}><header className="page-header"><div className="header-heading"><button className="icon-button mobile-menu" onClick={()=>setMobile(!mobile)} aria-label="打开导航"><Menu size={21}/></button><div><div className="eyebrow">{new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric',weekday:'long',timeZone:'Asia/Shanghai'}).format(new Date())}</div><h1>{navigation.find(n=>n[0]===page)?.[1]}</h1></div></div><div className="header-actions"><Button className="secondary breathing-entry" onClick={startBreathing} aria-label="缓一缓" title="缓一缓"><Wind size={17}/>缓一缓</Button><span className="agent-status"><i className={`status-dot ${state.agent.busy?'working':''}`}/>{state.agent.approvals.length?'等待处理':state.agent.busy?state.agent.background?'后台检查中':'正在回复':'Agent 待命'}</span><Button className="notification-button secondary" onClick={()=>enablePush(true)} title={notificationStatus}><Bell size={16}/><span>{notificationStatus}</span></Button></div></header>
+    {mobile&&<button className="sidebar-backdrop" onClick={()=>setMobile(false)} aria-label="收起导航"/>}<main className={page==='chat'?'main chat-main':'main'}><header className="page-header"><div className="header-heading"><button className="icon-button mobile-menu" onClick={()=>setMobile(!mobile)} aria-label="打开导航"><Menu size={21}/></button><div><div className="eyebrow">{new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric',weekday:'long',timeZone:'Asia/Shanghai'}).format(new Date())}</div><h1>{navigation.find(n=>n[0]===page)?.[1]}</h1></div></div><div className="header-actions"><Button className="secondary" onClick={() => setSearching(true)} aria-label="搜索整个工作台" title="搜索整个工作台"><Search size={17}/></Button><Button className="secondary breathing-entry" onClick={startBreathing} aria-label="缓一缓" title="缓一缓"><Wind size={17}/>缓一缓</Button><span className="agent-status"><i className={`status-dot ${state.agent.busy?'working':''}`}/>{state.agent.approvals.length?'等待处理':state.agent.busy?state.agent.background?'后台检查中':'正在回复':'Agent 待命'}</span><Button className="notification-button secondary" onClick={()=>enablePush(true)} title={notificationStatus}><Bell size={16}/><span>{notificationStatus}</span></Button></div></header>
       {(!connected||state.error||state.taskService.error)&&<div className="global-alert" role="status"><CircleAlert size={18}/><span>{[!connected&&(connectionError||'连接中断，正在尝试重连。当前草稿不会清空。'),state.error,state.taskService.error].filter(Boolean).join(' · ')}</span></div>}
       {!breathing && !state.breathing?.active && state.breathing?.reminderCount > 0 && <div className="breathing-summary">
         <Button onClick={showBreathingReminders}><Bell size={16}/>练习期间有 {state.breathing.reminderCount} 条提醒<ArrowUpRight size={15}/></Button>
       </div>}
-      <Chat active={page==='chat'}/><div className="page-content" hidden={page==='chat'}><DecisionGuide active={page==='decisions'}/>{page==='overview'&&<Overview/>}{page==='tasks'&&<Tasks/>}{page==='jobs'&&<Jobs/>}{page==='memory'&&<Memory/>}{page==='timeline'&&<Timeline/>}{page==='answer-book'&&<AnswerBook/>}{page==='settings'&&<Settings/>}</div>
+      <Chat active={page==='chat'}/><div className="page-content" hidden={page==='chat'}><DecisionGuide active={page==='decisions'}/>{page==='overview'&&<Overview/>}{page==='tasks'&&<Tasks/>}{page==='tools'&&<Toolbox/>}{page==='jobs'&&<Jobs/>}{page==='memory'&&<Memory/>}{page==='timeline'&&<Timeline/>}{page==='answer-book'&&<AnswerBook/>}{page==='settings'&&<Settings/>}</div>
     </main></div>{notice&&<div className={`toast ${notice.error?'error':''}`} role="status"><span>{notice.text}</span><button className="icon-button" aria-label="关闭提示" onClick={()=>setNotice(null)}><X size={16}/></button></div>}
     {historyMessage&&<Dialog title="历史消息" onClose={()=>setHistoryMessage(null)} wide><small>{fmt(historyMessage.createdAt)}</small><p className="preserve-lines">{historyMessage.text}</p><div className="attachments">{(historyMessage.images||[]).map(image=><a key={image.id} href={`/api/chat-image?id=${encodeURIComponent(image.id)}`} target="_blank" rel="noreferrer"><img src={`/api/chat-image?id=${encodeURIComponent(image.id)}`} alt={image.name}/></a>)}</div></Dialog>}
+    {searching && <SearchDialog close={() => setSearching(false)}/>}
     {breathingReminders && <Dialog title="练习期间的提醒" onClose={() => setBreathingReminders(null)} wide>
       {breathingReminders.messages.map(message => <Button key={message.id} className="overview-notice" onClick={async () => {
         setBreathingReminders(null);

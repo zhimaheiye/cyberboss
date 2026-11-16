@@ -8,7 +8,7 @@ async function main() {
   const url = new URL(endpoint.url);
   if (url.hostname !== "127.0.0.1" || url.protocol !== "http:") throw new Error("工作台工具仅连接本机");
   async function request(route, body) {
-    const timeout = ['cb_maintenance', 'cb_browser'].includes(body?.name) ? 600000 : 45000;
+    const timeout = ['cb_maintenance', 'cb_browser', 'cb_recall', 'cb_toolbox'].includes(body?.name) ? 600000 : 45000;
     const response = await fetch(`${url.origin}${route}`, { method: body ? "POST" : "GET", signal: AbortSignal.timeout(timeout), redirect: "error",
       headers: { Authorization: `Bearer ${endpoint.token}`, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
     const data = await response.json();
