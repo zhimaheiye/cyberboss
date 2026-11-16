@@ -30,8 +30,9 @@ function nextRun(job, after = new Date()) {
 class JobService {
   constructor(store) { this.store = store; }
   list() { return this.store.data.jobs; }
-  save(input) {
+  save(input, actor = 'agent') {
     const existing = input.id ? this.list().find(j => j.id === input.id) : null;
+    const previousStatus = existing?.status;
     if (input.id && !existing) throw new Error("任务不存在");
     if (existing && input.version !== existing.version) throw new Error("任务已经被更新，请刷新后再保存");
     const createdAt = existing?.createdAt || new Date().toISOString();
@@ -49,10 +50,12 @@ class JobService {
       contexts: String(input.contexts ?? existing?.contexts ?? ""),
       blocker: (input.status ?? existing?.status) === 'blocked' ? input.blocker ?? existing?.blocker ?? null : null,
       taskId: String(input.taskId ?? existing?.taskId ?? ""),
+      todoVisibility: input.todoVisibility ?? existing?.todoVisibility ?? 'auto',
       acknowledgedValues: existing?.acknowledgedValues || [], version: (existing?.version || 0) + 1,
     };
     if (!job.title || job.title.length > 300 || job.instructions.length > 50000) throw new Error("请填写标题，执行说明最多 5 万字");
     if (!KINDS.includes(job.kind) || !STATUSES.includes(job.status)) throw new Error("任务类型或状态不正确");
+    if (!['auto', 'show', 'hide'].includes(job.todoVisibility)) throw new Error('待办显示方式无效');
     if (!Number.isFinite(job.minimumGapMinutes) || job.minimumGapMinutes < 0) throw new Error("提醒间隔无效");
     if (job.suppressUntil && !Number.isFinite(Date.parse(job.suppressUntil))) throw new Error("静默日期无效");
     for (const key of ["activeFrom", "activeUntil"]) if (job[key] && !Number.isFinite(Date.parse(job[key]))) throw new Error("有效窗口日期无效");
@@ -60,14 +63,20 @@ class JobService {
     const changed = !existing || JSON.stringify(existing.schedule) !== JSON.stringify(job.schedule) || existing.timezone !== job.timezone || existing.status !== job.status;
     job.nextRunAt = changed ? calculated : existing.nextRunAt;
     if (existing) Object.assign(existing, job); else this.list().push(job);
+    if (existing && previousStatus !== job.status) {
+      this.store.data.taskEvents ||= [];
+      this.store.add('taskEvents', { action: 'job_status_changed', jobId: job.id, title: job.title, actor,
+        previousStatus, status: job.status, evidence: job.status === 'blocked' ? job.blocker?.evidence || '' : '' });
+    }
     this.store.save();
     return job;
   }
-  acknowledge({ id, value, until, note = "用户确认已处理" }) {
+  acknowledge({ id, value, until, note }, actor = 'agent') {
+    note = String(note || (actor === 'user' ? '用户确认已处理' : 'Agent 判定本次已处理'));
     const job = this.list().find(j => j.id === id);
     if (!job) throw new Error("任务不存在");
     if (value) {
-      if (!job.acknowledgedValues.some(v => v.value === value)) job.acknowledgedValues.push({ value, note, at: new Date().toISOString() });
+      if (!job.acknowledgedValues.some(v => v.value === value)) job.acknowledgedValues.push({ value, note, actor, at: new Date().toISOString() });
     } else if (until) {
       if (!Number.isFinite(Date.parse(until)) || Date.parse(until) <= Date.now()) throw new Error("本期完成需要未来的下一周期开始时间");
       job.suppressUntil = new Date(until).toISOString();
@@ -78,7 +87,9 @@ class JobService {
     for (const message of this.store.data.messages.filter(m => m.jobId === id && m.unread)) {
       message.unread = false; message.resolvedAt = new Date().toISOString(); message.pushStatus = "cancelled";
     }
-    this.store.add("runs", { jobId: id, status: "acknowledged", note, value, until });
+    this.store.add("runs", { jobId: id, status: "acknowledged", actor, note, value, until });
+    this.store.data.taskEvents ||= [];
+    this.store.add('taskEvents', { action: 'job_acknowledged', jobId: id, title: job.title, actor, evidence: note, value, until });
     return job;
   }
   importHub(root) {

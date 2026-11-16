@@ -74,6 +74,8 @@ async function startDesktop(config) {
         }
         if (req.method === "GET" && url.pathname === "/api/message") return json(res, 200, app.store.data.messages.find(m => m.id === url.searchParams.get("id")) || null);
         if (req.method === "GET" && url.pathname === "/api/tools") return json(res, 200, app.tools.listTools());
+        if (req.method === "GET" && url.pathname === "/api/task-history") return json(res, 200, app.taskHistory.list({
+          taskId: url.searchParams.get('taskId'), before: url.searchParams.get('before'), limit: url.searchParams.get('limit') || 100 }));
         if (req.method !== "POST") return json(res, 405, { error: "此操作需要 POST" });
         const body = await readBody(req, url.pathname === "/api/chat" ? CHAT_BODY_LIMIT : undefined);
         let result;
@@ -96,11 +98,16 @@ async function startDesktop(config) {
             if (body.action === "progress") return json(res, 200, result);
             break;
           case "/api/tool":
-            result = await app.tools.invokeTool(body.name, body.args);
-            if (body.name?.startsWith("opentodo_") && !/^opentodo_(list|get|search|today)_/.test(body.name)) app.taskRevision++;
+            try { result = await app.tools.invokeTool(body.name, body.args, auth ? 'agent' : 'user'); }
+            finally {
+              if (body.name?.startsWith("opentodo_") && !/^opentodo_(list|get|search|today)_/.test(body.name)) { app.taskRevision++; changed(); }
+            }
             break;
-          case "/api/jobs/save": result = app.jobs.save(body); break;
-          case "/api/jobs/acknowledge": result = app.jobs.acknowledge(body); break;
+          case "/api/tasks/confirm":
+            if (auth) throw new Error('人工确认请使用工作台按钮；Agent 完成任务会保留 Agent 来源');
+            result = await app.taskHistory.confirm(body); app.taskRevision++; break;
+          case "/api/jobs/save": result = app.jobs.save(body, auth ? 'agent' : 'user'); break;
+          case "/api/jobs/acknowledge": result = app.jobs.acknowledge(body, auth ? 'agent' : 'user'); break;
           case "/api/jobs/run": result = app.runJob(body.id); break;
           case "/api/events": result = app.runJob(body.jobId, body.data); break;
           case "/api/import": result = app.jobs.importHub(String(body.path || "D:\\personal-hub")); break;

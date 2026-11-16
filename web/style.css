@@ -510,3 +510,11 @@ dialog::backdrop { background:#1c2a235c; backdrop-filter:blur(3px); }
   *,*::before,*::after { animation:none!important; transition:none!important; scroll-behavior:auto!important; }
   .breathing-circle { transform: scale(.86); }
 }
+/* Task provenance uses the workbench's existing cards and form controls. */
+.task-view-note { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; font-size: 13px; }
+.task-completion { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-block: 12px; }
+.task-completion .badge { white-space: normal; }
+.task-history-entry { margin-block: 12px; overflow-wrap: anywhere; }
+.task-history-entry small { display: block; margin-block: 6px; }
+.task-history-entry blockquote { margin: 12px 0; padding: 8px 12px; border-left: 3px solid currentColor; }
+.task-review { padding: 12px; margin-top: 12px; border: 1px solid currentColor; border-radius: 12px; }

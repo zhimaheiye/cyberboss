@@ -34,7 +34,7 @@ export function deliverNotifications(state) {
   for (const message of state.messages.filter(m => m.unread && !m.breathingSessionId && m.pushStatus !== 'cancelled' && ['proactive', 'reminder'].includes(m.kind))) {
     if (message.kind === 'proactive' && state.quiet) continue;
     const job = state.jobs.find(j => j.id === message.jobId);
-    if (job && (job.status !== 'active' || Date.parse(job.suppressUntil) > Date.now() || Date.parse(job.activeUntil) < Date.now() || Date.parse(job.activeFrom) > Date.now())) continue;
+    if (job && !message.jobException && (job.status !== 'active' || Date.parse(job.suppressUntil) > Date.now() || Date.parse(job.activeUntil) < Date.now() || Date.parse(job.activeFrom) > Date.now())) continue;
     registration.active.postMessage({ type: 'notify', message: { id: message.id, title: message.kind === 'reminder' ? 'CyberBoss · 到点提醒' : 'CyberBoss · 有事告诉你', body: message.text.slice(0, 500) } });
   }
 }

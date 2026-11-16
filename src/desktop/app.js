@@ -3,6 +3,7 @@ const crypto = require("crypto");
 const { DesktopStore } = require("./store");
 const { JobService, nextRun } = require("./jobs");
 const { OpenTodo } = require("./opentodo");
+const { TaskHistory } = require("./task-history");
 const { DesktopTools } = require("./tools");
 const { DesktopAgent } = require("./agent");
 const { saveChatImages, removeChatImages, resolveChatAttachments } = require("./chat-images");
@@ -21,9 +22,10 @@ class DesktopApp {
     this.store = new DesktopStore(dir); this.jobs = new JobService(this.store);
     this.queue = new SystemMessageQueueStore({ filePath: path.join(dir, "wake-queue.json") });
     this.todo = new OpenTodo(dir, Number(process.env.CYBERBOSS_OPENTODO_PORT || 4319));
+    this.taskHistory = new TaskHistory(this.store, this.todo);
     this.maintenance = new Maintenance(this.store, changed);
     this.browser = new BrowserBridge(this.store, this.maintenance); this.skills = new LearnedSkills(this.store);
-    this.tools = new DesktopTools({ store: this.store, jobs: this.jobs, todo: this.todo, maintenance: this.maintenance, browser: this.browser, skills: this.skills });
+    this.tools = new DesktopTools({ store: this.store, jobs: this.jobs, todo: this.todo, taskHistory: this.taskHistory, maintenance: this.maintenance, browser: this.browser, skills: this.skills });
     this.breathing = new Breathing(this.store, changed);
     this.answerBook = new AnswerBook(dir);
     this.notifications = new Notifications(this.store, changed, this.breathing);
@@ -35,6 +37,7 @@ class DesktopApp {
     try { await this.todo.start(); await this.tools.refresh(); }
     catch (error) { this.todo.error = error.message; }
     this.agent.toolNames = this.tools.listTools().map(t => t.name);
+    this.noticeJobExceptions();
     this.timer = setInterval(() => this.tick().catch(error => { this.error = error.message; this.changed(); }), 15000);
     this.changed();
     // Do not spend subscription quota just because the web page was opened.
@@ -49,7 +52,7 @@ class DesktopApp {
       observations: d.observations.slice(-200), agent: this.agent.view(), taskService: { url: this.todo.url, error: this.todo.error },
       memoryDir: path.join(this.store.dir, "memory"), stateDir: this.store.dir, error: this.error || "",
       pushPublicKey: d.vapid?.publicKey, nextCheckinAt: d.nextCheckinAt, quiet: this.notifications.isQuiet(),
-      pending: this.queue.peekForAccount("desktop").length, taskRevision: this.taskRevision };
+      pending: this.queue.peekForAccount("desktop").length, taskRevision: this.taskRevision, taskHistoryRevision: d.taskEvents.length };
   }
   enqueue(text, { jobId = "", id = crypto.randomUUID(), background = true } = {}) {
     if (background && jobId && (this.agent.active?.run?.jobId === jobId || this.queue.peekForAccount("desktop").some(m => JSON.parse(m.text).jobId === jobId))) return;
@@ -111,6 +114,7 @@ class DesktopApp {
   }
   async tick() {
     if (this.stopped) return;
+    this.noticeJobExceptions();
     const now = Date.now();
     for (const job of this.jobs.list()) {
       if (job.status !== "active" || !withinWindow(job) || !job.nextRunAt || Date.parse(job.nextRunAt) > now) continue;
@@ -137,6 +141,20 @@ class DesktopApp {
     }
     void this.notifications.flush().catch(error => { this.error = error.message; this.changed(); });
     void this.pump();
+  }
+  noticeJobExceptions() {
+    for (const job of this.jobs.list().filter(j => j.status === 'blocked')) {
+      const run = this.store.data.runs.findLast(r => r.jobId === job.id);
+      if (['running', 'acknowledged'].includes(run?.status)) continue;
+      const evidence = job.blocker?.evidence || job.lastError;
+      if (!evidence) continue;
+      const key = crypto.createHash('sha256').update(JSON.stringify([job.id, job.blocker?.observedAt, run?.id, evidence])).digest('hex');
+      if (this.store.data.messages.some(m => m.jobId === job.id && (m.jobExceptionKey === key
+        || m.jobException && run?.id && m.runId === run.id
+        || m.unread && m.pushStatus !== 'cancelled'))) continue;
+      this.notifications.add(`${job.title}：${evidence}\n${job.blocker?.nextAction || '后续运行已暂停，详情见「交给 Agent」的执行记录。'}`,
+        'proactive', { jobId: job.id, jobException: true, jobExceptionKey: key, runId: run?.id || null });
+    }
   }
   async pump() {
     if (this.pumping || this.stopped) return;
@@ -171,10 +189,12 @@ class DesktopApp {
           const last = job?.lastNotifiedAt || (!job ? this.store.data.lastProactiveAt : null);
           const allowed = !last || Date.now() - Date.parse(last) >= cooldown * 60000;
           const needsHandoff = job?.status === 'blocked' && job.blocker?.sourceRunId === run.id;
-          if (action.action === "send_message" && allowed && (!job || (job.status === "active" || needsHandoff) && withinWindow(job) && !(Date.parse(job.suppressUntil) > Date.now()))) {
-            this.notifications.add(action.message, "proactive", { jobId: input.jobId });
+          if (action.action === "send_message" && (allowed || needsHandoff) && (!job || (job.status === "active" || needsHandoff) && withinWindow(job) && !(Date.parse(job.suppressUntil) > Date.now()))) {
+            this.notifications.add(action.message, "proactive", { jobId: input.jobId, ...(needsHandoff ? { jobException: true, runId: run.id } : {}) });
             if (job) job.lastNotifiedAt = new Date().toISOString();
             this.store.data.lastProactiveAt = new Date().toISOString();
+          } else if (needsHandoff) {
+            this.notifications.add(`${job.title}：${job.blocker.evidence}\n${job.blocker.nextAction}`, 'proactive', { jobId: job.id, jobException: true, runId: run.id });
           } else if (action.action === "send_message") run.note = "消息被静默状态或提醒冷却阻止";
         } else this.store.add("messages", { role: "assistant", text: reply, kind: "chat", unread: false });
         if (job) { job.lastRunAt = run.finishedAt; job.lastError = job.status === 'blocked' ? job.blocker?.evidence || job.lastError : ""; }
@@ -187,6 +207,9 @@ class DesktopApp {
           this.error = `自动唤醒已暂停：${error.message}`;
         }
         if (!input.background) this.store.add("messages", { role: "system", kind: "error", text: error.message });
+        else if (!run.cancelRequested) this.notifications.add(
+          `${job ? job.title : '自然唤醒'}本轮未完成：${error.message}${job?.status === 'blocked' ? '\n后续运行已暂停，详情见「交给 Agent」的执行记录。' : ''}`,
+          'proactive', { jobId: input.jobId, jobException: true, runId: run.id });
       }
       try { this.skills.finish(run, run.learningOutcome); }
       catch (error) { run.learningError = `技能保存未完成：${error.message}`; this.error = run.learningError; }

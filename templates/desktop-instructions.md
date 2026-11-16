@@ -7,9 +7,15 @@
 ## 工作方法
 
 - 先用 opentodo_* 工具读取真实任务，再更新；不要声称已写入却只在回复中列计划。
-- 待办与完成历史由 OpenTodo 管理；cb_jobs 管理“什么时候唤醒 Agent／提醒用户”。两者用 taskId 关联，不能互相冒充。
+- 待办和周期实例由 OpenTodo 管理；工作台额外保存完成判断、人工确认和更正的时间线。cb_jobs 管理“什么时候唤醒 Agent／提醒用户”。
+- 默认由 Agent 自行执行的循环任务只建 cb_jobs，不同时创建用户待办。已有 taskId 关联在自动模式下隐藏常规周期 watch/operation 卡片，异常也进入提醒。只有用户确实需要亲自管理一件事时才建立关联待办，并设置 todoVisibility="show"；不要为了记录每次后台执行而创建卡片。
+- 可以自主依据实际结果调用 opentodo_complete_tasks 勾选完成，必须携带 completion_evidence（观察依据、来源与对应哪一期），后台会记录为 AI 判断。不要以一轮执行结束或没有报错作为完成证据。先读取任务和 cb_task_history，周期任务一次只完成当前一期。
+- 用户在当前对话明确说已经完成时，直接代为完成，并把这句原话放入 user_confirmation_quote；后台关联当前用户消息和原消息时间，界面显示“Agent 代记你的确认”。只有明确确认完成／更正的原话才可使用这个字段，不能引用问题、猜测或旧消息。工作台按钮是直接人工确认，来源由后台按调用入口记录，不可自行设置。
+- AI 判定错误时可以用 opentodo_reopen_tasks 更正，并写明 completion_evidence；旧判断保留。用户确认完成后不再根据自主推断重新打开，只有用户本轮明确要求更正才可引用其原话操作。不要用创建重复任务绕过完成状态。结果未知先核对，不重复提交完成，避免跳过下一期。
+- 用户核查已经由 AI 完成的周期实例时，使用 cb_task_history 中的 occurrenceId 进行确认或重新打开，不对已经移到下一期的原 taskId 再执行完成。更正历史实例不自动倒退整个循环的日期，后续计划需要单独明确调整。
+- 维护任务状态必须经过工作台工具，不直接修改 OpenTodo 数据库或绕过工作台调用本机接口，否则无法保留该操作的来源。cb_task_history 可分页读取完整记录，旧记录来源未知时不得补猜作者。
 - 每小时循环使用 cb_jobs，不能向 OpenTodo 传 every hour。每小时整点使用 schedule={type:"recurring",rrule:"FREQ=HOURLY;BYMINUTE=0;BYSECOND=0",time:"00:00",startDate:"当前本地日期"}，timezone="Asia/Shanghai"。每隔 N 小时使用 FREQ=HOURLY;INTERVAL=N，time/startDate 指明起点。明确到点提醒用 reminder，自动操作用 operation，定期查信息用 watch。小时级主动消息的 minimumGapMinutes 根据需求设为 60 或更短，避免默认一天冷却挡住后续提醒。
-- 用户要求创建小时任务时应实际保存 cb_jobs 并读取 nextRunAt 核对。若同时需要待办卡片，可创建无 recurrence 的 OpenTodo 待办并通过 taskId 关联。不要因 OpenTodo 的周期语法受限而拒绝或放弃建立小时调度。用户口头“整点”与“从现在起每隔一小时”分别按整点和指定起点处理。
+- 用户要求创建小时任务时应实际保存 cb_jobs 并读取 nextRunAt 核对。只有确实需要人工待办时才创建无 recurrence 的 OpenTodo 卡片并关联 taskId。用户口头“整点”与“从现在起每隔一小时”分别按整点和指定起点处理。
 - 区分准时直接提醒、信息监控、Agent 执行作业、机会式待办。后台执行结束不等于需要通知用户。
 - 长期监控持续保留定义。用户完成的是具体一期或具体对象（如某条兑换码），用 acknowledgedValues 或 suppressUntil 记录，不结束整个监控。
 - 分期活动：查证当前期起止与官方来源；用户提供的估计周期只是参考，不把估计永久固化。记录本期任务，用户确认后销账，下期另建实例。

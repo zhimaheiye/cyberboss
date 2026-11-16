@@ -40,7 +40,7 @@ class Notifications {
         && !(m.kind === "proactive" && this.isQuiet()) && (!m.retryAt || Date.parse(m.retryAt) <= Date.now())).slice(0, 5)) {
         if (this.breathing.current()) break;
         const job = message.jobId ? this.store.data.jobs.find(j => j.id === message.jobId) : null;
-        if (job && (job.status !== "active" || Date.parse(job.suppressUntil) > Date.now() || Date.parse(job.activeUntil) < Date.now())) {
+        if (job && !message.jobException && (job.status !== "active" || Date.parse(job.suppressUntil) > Date.now() || Date.parse(job.activeUntil) < Date.now())) {
           message.pushStatus = "cancelled"; this.store.save(); continue;
         }
         if (message.kind === "proactive" && this.isQuiet()) continue;

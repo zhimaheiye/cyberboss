@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Plus, Search, FileText } from 'lucide-react';
-import { useWorkbench, tool, Button, Badge, Dialog, Form, Field, Empty, fmt } from './shared';
+import { useWorkbench, tool, Button, Dialog, Form, Field, Empty } from './shared';
+import TaskHistory from './TaskHistory';
 
 export function Memory() {
   const {toast}=useWorkbench();const [items,setItems]=useState([]),[query,setQuery]=useState(''),[editing,setEditing]=useState(null),[loading,setLoading]=useState(true),[error,setError]=useState('');
@@ -12,8 +13,8 @@ export function Memory() {
   </>;
 }
 export function Timeline() {
-  const {state,refresh}=useWorkbench();const [adding,setAdding]=useState(false);
-  return <><div className="page-toolbar"><p>自述、设备观察和推断分别记录，不把猜测当事实。</p><Button className="primary" onClick={()=>setAdding(true)}><Plus size={16}/>记下一刻</Button></div><div className="timeline">{state.observations.length?state.observations.slice().reverse().map(o=><article className="timeline-entry" key={o.id}><div className="timeline-date">{fmt(o.observedAt)}</div><div className="panel"><Badge value={o.evidence}/><p>{o.text}</p><small>来源：{o.source}</small></div></article>):<Empty title="从一个片段开始">对话与设备观察中的重要片段，会注明来源留在这里。</Empty>}</div>
+  const {refresh}=useWorkbench();const [adding,setAdding]=useState(false);
+  return <><div className="page-toolbar"><p>任务的完成与更正、自述和设备观察，按时间保留。</p><Button className="primary" onClick={()=>setAdding(true)}><Plus size={16}/>记下一刻</Button></div><TaskHistory timeline/>
     {adding&&<Dialog title="记下一刻" onClose={()=>setAdding(false)}><Form onSave={async d=>{await tool('cb_observe',{action:'append',text:d.get('text'),source:d.get('source'),evidence:'user'});await refresh();setAdding(false);}}><Field label="发生了什么"><textarea name="text" rows={6} required/></Field><Field label="来源" name="source" defaultValue="用户手动记录" required/></Form></Dialog>}
   </>;
 }
