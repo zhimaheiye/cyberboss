@@ -518,3 +518,37 @@ dialog::backdrop { background:#1c2a235c; backdrop-filter:blur(3px); }
 .task-history-entry small { display: block; margin-block: 6px; }
 .task-history-entry blockquote { margin: 12px 0; padding: 8px 12px; border-left: 3px solid currentColor; }
 .task-review { padding: 12px; margin-top: 12px; border: 1px solid currentColor; border-radius: 12px; }
+.decision-page { max-width: 1080px; margin: 0 auto; }
+.decision-tabs { margin-bottom: 24px; flex-wrap: wrap; }
+.decision-scene { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; text-align: left; color: inherit; min-height: 220px; }
+.decision-scene:hover { border-color: var(--accent); }
+.decision-scene h2 { margin: 0; font-size: 22px; }
+.decision-scene p { color: var(--muted); line-height: 1.8; }
+.decision-scene span { display: flex; align-items: center; gap: 10px; margin-top: auto; color: var(--accent); }
+.decision-session { max-width: 740px; margin: 0 auto; }
+.decision-session-nav { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
+.decision-session-nav > span { font-size: 13px; color: var(--muted); }
+.decision-step { padding: clamp(24px, 5vw, 48px); }
+.decision-step h2 { font-size: clamp(23px, 3vw, 32px); line-height: 1.6; margin: 18px 0 24px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.decision-step p { line-height: 1.9; overflow-wrap: anywhere; }
+.decision-step > .text-button { margin-top: 24px; }
+.decision-options { display: grid; gap: 12px; }
+.decision-options button { display: flex; align-items: center; justify-content: space-between; gap: 16px; text-align: left; padding: 20px; border: 1px solid var(--line); background: var(--surface); color: var(--accent); border-radius: 14px; white-space: normal; }
+.decision-options button:hover { border-color: var(--accent); background: #f1f5ef; }
+.decision-options button span { overflow-wrap: anywhere; }
+.decision-options svg { flex-shrink: 0; }
+.decision-result { border-top: 3px solid var(--accent); }
+.decision-trail { margin-top: 22px; color: var(--muted); }
+.decision-trail li { padding: 10px 0; }
+.decision-trail li span, .decision-trail li strong { display: block; line-height: 1.8; }
+.decision-editor { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 24px; margin-top: 24px; }
+.decision-node-list { display: flex; flex-direction: column; gap: 8px; }
+.decision-node-list > button { text-align: left; white-space: normal; overflow-wrap: anywhere; background: var(--surface); border: 1px solid var(--line); color: inherit; }
+.decision-node-list > button.selected { border-color: var(--accent); background: #edf3ed; }
+.decision-node-list small { display: block; color: var(--muted); margin-bottom: 4px; }
+.decision-option-editor { padding: 14px; border: 1px solid var(--line); border-radius: 12px; margin-bottom: 14px; }
+.decision-node-delete { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 24px; }
+.decision-node-delete small { color: var(--muted); }
+.decision-remove { border-top: 1px solid var(--line); margin-top: 24px; padding-top: 16px; }
+.decision-reference { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.9; }
+@media (max-width: 700px) { .decision-editor { grid-template-columns: 1fr; } .decision-node-list { max-height: 240px; overflow: auto; } }
