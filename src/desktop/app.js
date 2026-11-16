@@ -4,6 +4,7 @@ const { DesktopStore } = require("./store");
 const { JobService, nextRun } = require("./jobs");
 const { OpenTodo } = require("./opentodo");
 const { TaskHistory } = require("./task-history");
+const { observationViews } = require('./observations');
 const { DesktopTools } = require("./tools");
 const { DesktopAgent } = require("./agent");
 const { saveChatImages, removeChatImages, resolveChatAttachments } = require("./chat-images");
@@ -57,7 +58,7 @@ class DesktopApp {
     return { settings: d.settings, jobs: d.jobs, runs: d.runs.slice(-200).map(runSummary), messages: d.messages.slice(-300),
       pendingChats, maintenance: this.maintenance.view(), breathing: this.breathing.view(),
       learnedSkills: this.skills.invoke({ action: "list" }),
-      observations: d.observations.slice(-200), agent: this.agent.view(), taskService: { url: this.todo.url, error: this.todo.error },
+      ...observationViews(d.observations), agent: this.agent.view(), taskService: { url: this.todo.url, error: this.todo.error },
       memoryDir: path.join(this.store.dir, "memory"), stateDir: this.store.dir, error: this.error || "",
       pushPublicKey: d.vapid?.publicKey, nextCheckinAt: d.nextCheckinAt, quiet: this.notifications.isQuiet(),
       pending: this.queue.peekForAccount("desktop").length, taskRevision: this.taskRevision, taskHistoryRevision: d.taskEvents.length,

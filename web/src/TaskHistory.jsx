@@ -23,6 +23,7 @@ export default function TaskHistory({ taskId, timeline = false }) {
   const { state, refresh, refreshTasks, toast } = useWorkbench();
   const [page, setPage] = useState({ events: [], nextCursor: null }), [error, setError] = useState(''), [loading, setLoading] = useState(true);
   const [review, setReview] = useState(null);
+  const [showExecution, setShowExecution] = useState(false);
   async function load(before) {
     const result = await api(`task-history?${new URLSearchParams({ ...(taskId ? { taskId } : {}), ...(before ? { before } : {}) })}`);
     setPage(previous => ({ events: before ? [...previous.events, ...result.events] : result.events, nextCursor: result.nextCursor }));
@@ -46,13 +47,15 @@ export default function TaskHistory({ taskId, timeline = false }) {
     toast(confirmed ? '已记录你的确认，原来的 AI 判断保留' : '已重新打开，之前的完成记录保留');
   }
   const entries = [...page.events.map(e => ({ type: 'task', at: e.createdAt, id: e.id, data: e })),
-    ...(timeline ? state.observations.map(o => ({ type: 'observation', at: o.observedAt, id: o.id, data: o })) : [])]
+    ...(timeline ? [...state.observations, ...(showExecution ? state.executionObservations || [] : [])]
+      .map(o => ({ type: 'observation', at: o.observedAt, id: o.id, data: o })) : [])]
     .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
   return <div className="task-history"><p className="hint">保留每次判断、确认和更正。旧记录及完整看板内的操作可能没有来源；具体任务历史可继续加载。</p>
+    {timeline && <div className="filter-bar"><label className="check"><input type="checkbox" checked={showExecution} onChange={e => setShowExecution(e.target.checked)}/>显示 Agent 执行记录</label></div>}
     {error && <div className="alert error">{error}</div>}{loading && <p className="hint">正在读取记录…</p>}
     {!loading && !entries.length && <Empty title="还没有记录"/>}
     {entries.map(entry => <article className="panel task-history-entry" key={entry.id}>{entry.type === 'observation'
-      ? <><div className="section-heading"><Badge value={entry.data.evidence}/><time>{fmt(entry.at)}</time></div><p>{entry.data.text}</p><small>来源：{entry.data.source}</small></>
+      ? <><div className="section-heading"><Badge value={entry.data.evidence}>{entry.data.kind === 'execution' ? 'Agent 执行记录' : null}</Badge><time>{fmt(entry.at)}</time></div><p>{entry.data.text}</p><small>来源：{entry.data.source}</small></>
       : <><TaskEvent event={entry.data}/>{['completed', 'occurrence_completed', 'confirmed'].includes(entry.data.action) && <Button onClick={() => inspect(entry.data)}>核查当前状态</Button>}
         {review?.eventId === entry.id && <div className="task-review"><p>{review.task.completed ? completionAuthor(review.task.completionRecord) : '此项目前未完成'}</p>
           {review.task.completed && <div className="actions"><Button onClick={() => decide(true)}>我确认已完成</Button><Button onClick={() => decide(false)}>改回未完成</Button></div>}
