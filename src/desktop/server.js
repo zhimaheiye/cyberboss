@@ -61,6 +61,7 @@ async function startDesktop(config) {
         }
         if (req.method === "GET" && url.pathname === "/api/state") return json(res, 200, app.view());
         if (req.method === 'GET' && url.pathname === '/api/retrieval') return json(res, 200, app.retrieval.view());
+        if (req.method === 'GET' && url.pathname === '/api/magpie') { if (auth) throw new Error('模型连接配置请在设置页读取'); return json(res, 200, app.magpie.view()); }
         if (req.method === 'GET' && url.pathname === '/api/work') return json(res, 200, app.work.view(url.searchParams.get('jobId')));
         if (req.method === 'GET' && url.pathname === '/api/preferences') return json(res, 200, app.preferences.view());
         if (req.method === "GET" && url.pathname === "/api/answer-book") return json(res, 200, app.answerBook.view());
@@ -85,6 +86,12 @@ async function startDesktop(config) {
         const body = await readBody(req, url.pathname === "/api/chat" ? CHAT_BODY_LIMIT : undefined);
         let result;
         switch (url.pathname) {
+          case '/api/magpie':
+            if (auth) throw new Error('Magpie 配置请在工作台设置页操作');
+            if (body.action === 'models') result = await app.magpie.models(body);
+            else if (body.action === 'save') result = app.magpie.save(body);
+            else throw new Error('未知 Magpie 设置操作');
+            break;
           case '/api/work':
             if (auth) throw new Error('Agent 请使用 cb_work 工具，保留当前执行归属');
             result = await app.work.invoke(body, 'user'); break;

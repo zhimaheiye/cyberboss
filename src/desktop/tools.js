@@ -2,6 +2,7 @@ const object = properties => ({ type: "object", properties, additionalProperties
 const string = { type: "string" };
 const { observationKind } = require('./observations');
 const TOOLS = [
+  { name: 'cb_delegate', description: 'Delegate a bounded text-only extraction, organization, comparison or summarization step to the owner-configured Magpie model. Pass instruction and context; this helper has no tools and cannot execute actions. The main Agent must assess its output and retain sources. Use only when Magpie is enabled; never recursively delegate. Does not change job routing or model settings.', inputSchema: object({ instruction: string, context: string }) },
   { name: 'cb_work', description: 'Durable progress and explicit event subscriptions for existing jobs. read(jobId) returns progress/version, incoming events, and subscriptions. report applies only to the CURRENT job: expectedVersion, progress {summary,facts:[{text,source}],openQuestions:[string],nextStep,waitingFor,needsUser}; retain existing facts when updating and label uncertain facts. subscribe binds jobId to kind reference (cb_recall ref), file (one absolute UTF-8 text file), or event (source name), target, condition, enabled; update with id and version. First read establishes baseline, later changes wake active jobs. Paused/blocked jobs never auto-resume. emit uses source,key,data, optional jobId; key must identify the original external event for deduplication. Subscriptions and tool descriptions grant no new execution authority.', inputSchema: object({ action: { enum: ['read','report','subscribe','emit'] }, jobId: string, expectedVersion: {type:'integer'}, progress: {type:'object'}, id:string, version:{type:'integer'}, kind:{enum:['reference','file','event']}, target:string, condition:string, enabled:{type:'boolean'}, source:string, key:string, data:{} }) },
   { name: 'cb_verification', description: 'Record the CURRENT background job query attempt immediately after a failed, inconclusive or successful source lookup. Supply method (search/direct HTTP/browser etc), target (URL/query), status and concrete result/error detail. Use another method after failures. This preserves visible evidence; it does not itself finish the check. Final JSON must include verification status, summary, evidence and recovery explaining how earlier failures were resolved.', inputSchema: object({ method: string, target: string, status: { enum: ['succeeded', 'failed', 'inconclusive'] }, detail: string }) },
   { name: 'cb_retention', description: 'Normal recurring/check-in run retention. status reads the saved policy; preview counts eligible expired records without deletion; request schedules an idle-loop check under the existing policy. Cannot change retention days, disable protections or delete arbitrary records. Workbench process handles removal after this agent turn and indexing finish. Exceptions, human records and referenced evidence are protected.', inputSchema: object({ action: { enum: ['status', 'preview', 'request'] } }) },
@@ -21,7 +22,7 @@ const TOOLS = [
 const ALLOWED_TASK_TOOLS = new Set(["list_tasks", "get_task", "search_tasks", "today_summary", "list_projects", "create_project", "update_project", "create_tasks", "update_tasks", "complete_tasks", "reopen_tasks", "schedule_tasks", "move_tasks", "list_notes", "get_note", "search_notes", "create_note", "append_to_note", "add_reminders", "update_reminders", "remove_reminders", "list_workspaces", "list_labels", "add_comment"]);
 
 class DesktopTools {
-  constructor({ store, jobs, todo, taskHistory, maintenance, browser, skills, toolbox, retrieval, retention, work }) { Object.assign(this, { store, jobs, todo, taskHistory, maintenance, browser, skills, toolbox, retrieval, retention, work }); this.taskTools = []; }
+  constructor({ store, jobs, todo, taskHistory, maintenance, browser, skills, toolbox, retrieval, retention, work, magpie }) { Object.assign(this, { store, jobs, todo, taskHistory, maintenance, browser, skills, toolbox, retrieval, retention, work, magpie }); this.taskTools = []; }
   async refresh() {
     this.taskTools = (await this.todo.tools()).filter(t => ALLOWED_TASK_TOOLS.has(t.name)).map(t => ({
       ...t, name: `opentodo_${t.name}`,
@@ -35,6 +36,7 @@ class DesktopTools {
   }
   listTools() { return [...TOOLS, ...this.taskTools]; }
   async invokeTool(name, args = {}, actor = 'agent') {
+    if (name === 'cb_delegate') return this.magpie.delegate(args, require('./run-context').currentRun(this.store));
     if (name === 'cb_work') return this.work.invoke(args, actor);
     if (name === 'cb_verification') return require('./verification').recordAttempt(this.store, args);
     if (name === 'cb_retention') return this.retention.invoke(args);

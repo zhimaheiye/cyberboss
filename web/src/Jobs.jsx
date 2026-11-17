@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
 import RunProgress from './RunProgress';
 import WorkDetail, { Decision } from './WorkDetail';
+import { MagpieModelField } from './MagpieSettings';
 import { Plus, Download, Play, Pause, Pencil, CheckCheck, Clock3 } from 'lucide-react';
 import { useWorkbench, api, tool, Button, Badge, Dialog, Form, Field, Empty, labels, fmt, localDate } from './shared';
 
 const presets = {manual:'手动 / 事件触发',once:'一次性',hourly:'每小时整点',hours:'每隔若干小时',daily:'每天',weekly:'每周',monthly:'每月','month-end':'每月最后两天',interval:'每隔若干天',custom:'自定义周期规则'};
 const rules = {hourly:'FREQ=HOURLY;BYMINUTE=0;BYSECOND=0',daily:'FREQ=DAILY',weekly:'FREQ=WEEKLY',monthly:'FREQ=MONTHLY','month-end':'FREQ=MONTHLY;BYMONTHDAY=-2,-1'};
 function JobEditor({ job, close }) {
-  const { refresh, toast }=useWorkbench(); const schedule=job.schedule||{type:'manual'};
+  const { state, refresh, toast }=useWorkbench(); const schedule=job.schedule||{type:'manual'};
+  const [executor,setExecutor]=useState(job.executor||'codex'),[magpieModel,setMagpieModel]=useState(job.magpieModel||''),[models,setModels]=useState(state.magpie?.models||[]);
   const hours=/^FREQ=HOURLY(?:;INTERVAL=(\d+))?$/.exec(schedule.rrule||'');
   const days=/^FREQ=DAILY;INTERVAL=(\d+)$/.exec(schedule.rrule||'');
   const initial=schedule.type==='recurring' ? Object.keys(rules).find(k=>rules[k]===schedule.rrule) || (hours?'hours':days?'interval':'custom') : schedule.type;
@@ -16,10 +18,13 @@ function JobEditor({ job, close }) {
   return <Dialog title={job.id?'编辑托管事项':'新建托管事项'} onClose={close} wide><Form onSave={async d=>{
     const date=d.get('startDate'), time=d.get('time')||'09:00';
     const next=preset==='manual'?{type:'manual'}:preset==='once'?{type:'once',at:new Date(`${date}T${time}:00+08:00`).toISOString()}:{type:'recurring',rrule:rules[preset]||(preset==='hours'?`FREQ=HOURLY;INTERVAL=${Number(d.get('hours'))}`:preset==='interval'?`FREQ=DAILY;INTERVAL=${Number(d.get('days'))}`:d.get('rrule')),time:preset==='hourly'?'00:00':time,startDate:date};
-    await api('jobs/save',{...job,title:d.get('title'),kind,status:d.get('status'),instructions:d.get('instructions'),notificationText:d.get('notificationText')||job.notificationText||'',contexts:d.get('contexts'),taskId:d.get('taskId'),todoVisibility:d.get('todoVisibility'),schedule:next,timezone:d.get('timezone'),minimumGapMinutes:Number(gap),activeFrom:d.get('activeFrom'),activeUntil:d.get('activeUntil'),suppressUntil:d.get('suppressUntil')});
+    await api('jobs/save',{...job,executor,magpieModel,title:d.get('title'),kind,status:d.get('status'),instructions:d.get('instructions'),notificationText:d.get('notificationText')||job.notificationText||'',contexts:d.get('contexts'),taskId:d.get('taskId'),todoVisibility:d.get('todoVisibility'),schedule:next,timezone:d.get('timezone'),minimumGapMinutes:Number(gap),activeFrom:d.get('activeFrom'),activeUntil:d.get('activeUntil'),suppressUntil:d.get('suppressUntil')});
     await refresh(); toast('托管事项已保存'); close();
   }}><Field label="事项名称" name="title" defaultValue={job.title||''} required maxLength={300}/><div className="field-pair"><Field label="工作方式"><select value={kind} onChange={e=>setKind(e.target.value)}>{['reminder','watch','operation','opportunity'].map(k=><option key={k} value={k}>{labels[k]}</option>)}</select></Field><Field label="状态"><select name="status" defaultValue={job.status||'draft'}>{['draft','active','paused','blocked','done'].map(k=><option key={k} value={k}>{labels[k]}</option>)}</select></Field></div>
     <Field label="具体要求、来源与执行边界"><textarea name="instructions" defaultValue={job.instructions||''} rows={5} maxLength={50000}/></Field>
+    {kind!=='reminder'&&<div className="form-section"><h3>交给谁执行</h3><Field label="执行方式"><select value={executor} onChange={e=>setExecutor(e.target.value)}><option value="codex">Codex · 主 Agent</option><option value="auto">自动 · 技能可复用时优先 Magpie</option><option value="magpie">Magpie · 指定 API 模型</option></select></Field>
+      {executor!=='codex'&&<><MagpieModelField model={magpieModel} onChange={setMagpieModel} models={models} allowDefault defaultModel={state.magpie?.model}/><Button onClick={async()=>{const r=await api('magpie',{action:'models'});setModels(r.models);await refresh();toast(`已拉取 ${r.models.length} 个模型`);}}>拉取 Magpie 模型</Button>{!state.magpie?.enabled&&<p className="hint">Magpie 尚未启用，请先到设置页选择默认模型并启用；当前执行仍使用 Codex。</p>}<p className="hint">Magpie 使用工作台工具；需要 Codex 独有 MCP 或本地系统操作时交回主 Agent。自动模式按技能状态分配，不额外消耗模型来决定分配。</p></>}
+    </div>}
     {kind==='reminder'&&<Field label="到点提醒内容" name="notificationText" defaultValue={job.notificationText||job.title||''}/>}
     <div className="form-section"><h3>运行时间</h3><Field label="什么时候检查或提醒"><select value={preset} onChange={e=>{setPreset(e.target.value);if(!job.id&&['hourly','hours'].includes(e.target.value)&&Number(gap)===1440)setGap(60);}}>{Object.entries(presets).map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></Field>
       {preset!=='manual'&&<div className="field-pair"><Field label="日期 / 周期起点" name="startDate" type="date" defaultValue={schedule.startDate||(schedule.at?localDate(schedule.at):localDate())} required/>{preset!=='hourly'&&<Field label={preset==='once'?'时间（北京时间）':'时间（下方时区）'} name="time" type="time" defaultValue={time} required/>}</div>}

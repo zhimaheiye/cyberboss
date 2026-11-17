@@ -4,6 +4,7 @@ import { useWorkbench, api, Button, Form, Field, Badge, fmt, Empty } from './sha
 import RetrievalSettings from './RetrievalSettings';
 import RetentionSettings from './RetentionSettings';
 import PromptPreferences from './PromptPreferences';
+import MagpieSettings from './MagpieSettings';
 
 export default function Settings() {
   const {state,refresh,toast,notificationStatus,enablePush}=useWorkbench();
@@ -26,6 +27,7 @@ export default function Settings() {
     </section>
     <section className="panel"><h2>账户</h2><p>使用本机 Codex 的官方 ChatGPT 订阅登录。</p><Button onClick={async()=>{const result=await api('login',{});const url=new URL(result.authUrl);if(url.protocol!=='https:')throw new Error('登录地址异常');setAuthUrl(url.href);}}>打开官方登录</Button>{authUrl&&<a className="login-link" href={authUrl} target="_blank" rel="noreferrer">继续登录 <ExternalLink size={15}/></a>}</section>
     <RetrievalSettings/>
+    <MagpieSettings/>
     <RetentionSettings/>
     <PromptPreferences/>
     <section className="panel"><h2><Folder size={19}/>本机数据</h2><dl><dt>数据目录</dt><dd>{state.stateDir}</dd><dt>笔记文件</dt><dd>{state.memoryDir}</dd><dt>下次自然唤醒</dt><dd>{fmt(state.nextCheckinAt)}</dd></dl><p className="hint">内容按原用途保存，统一检索直接读取各功能的数据。向量配置和派生索引在数据目录的 search 子目录。</p></section>

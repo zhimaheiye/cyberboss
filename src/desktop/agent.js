@@ -98,6 +98,7 @@ class DesktopAgent {
         browserMaintenance: this.store.data.maintenance?.policy,
         currentRun: run ? { id: run.id, jobId: run.jobId, kind: this.store.data.jobs.find(j => j.id === run.jobId)?.kind, reusableSkillVersion: run.skillVersion } : null,
         lane: this.lane,
+        magpieAvailable: this.store.data.magpieEnabled === true,
         personalPreferences: this.store.data.promptPreferences?.versions?.at(-1)?.text || '',
         workProgress: run?.jobId ? this.store.data.workStates?.[run.jobId] || null : null,
         incomingEvents: run?.inputEvents || [],

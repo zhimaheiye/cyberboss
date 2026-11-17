@@ -51,11 +51,15 @@ class JobService {
       blocker: (input.status ?? existing?.status) === 'blocked' ? input.blocker ?? existing?.blocker ?? null : null,
       taskId: String(input.taskId ?? existing?.taskId ?? ""),
       todoVisibility: input.todoVisibility ?? existing?.todoVisibility ?? 'auto',
+      executor: input.executor ?? existing?.executor ?? 'codex',
+      magpieModel: String(input.magpieModel ?? existing?.magpieModel ?? '').trim().slice(0, 200),
       acknowledgedValues: existing?.acknowledgedValues || [], version: (existing?.version || 0) + 1,
     };
     if (!job.title || job.title.length > 300 || job.instructions.length > 50000) throw new Error("请填写标题，执行说明最多 5 万字");
     if (!KINDS.includes(job.kind) || !STATUSES.includes(job.status)) throw new Error("任务类型或状态不正确");
     if (!['auto', 'show', 'hide'].includes(job.todoVisibility)) throw new Error('待办显示方式无效');
+    if (!['codex', 'magpie', 'auto'].includes(job.executor)) throw new Error('执行方式无效');
+    if (actor === 'agent' && (job.executor !== (existing?.executor || 'codex') || job.magpieModel !== (existing?.magpieModel || ''))) throw new Error('任务的模型分配由用户在事项编辑中设置，Agent 可以提出建议');
     if (!Number.isFinite(job.minimumGapMinutes) || job.minimumGapMinutes < 0) throw new Error("提醒间隔无效");
     if (job.suppressUntil && !Number.isFinite(Date.parse(job.suppressUntil))) throw new Error("静默日期无效");
     for (const key of ["activeFrom", "activeUntil"]) if (job[key] && !Number.isFinite(Date.parse(job[key]))) throw new Error("有效窗口日期无效");

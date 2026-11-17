@@ -8,6 +8,7 @@ const { recordEvent } = require('./run-progress');
 // Do not import model reasoning, user prompts, token records or unrelated turns.
 async function readRunHistory(store, run, refresh = false) {
   if (!run || (!refresh && run.toolDetails?.length)) return run;
+  if (run.routing?.selected === 'magpie' && !run.routing.fallback && !run.threadId) return run;
   const threadId = run.threadId || store.data.threadId;
   if (!/^[a-f0-9-]{36}$/i.test(threadId || '')) return run;
   const started = Date.parse(run.createdAt);

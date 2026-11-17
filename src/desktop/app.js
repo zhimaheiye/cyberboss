@@ -7,6 +7,7 @@ const { TaskHistory } = require("./task-history");
 const { observationViews } = require('./observations');
 const { DesktopTools } = require("./tools");
 const { AgentPool } = require("./agent-pool");
+const { Magpie } = require('./magpie');
 const { WorkState } = require('./work-state');
 const { PromptPreferences } = require('./prompt-preferences');
 const { saveChatImages, removeChatImages, resolveChatAttachments } = require("./chat-images");
@@ -42,11 +43,12 @@ class DesktopApp {
     this.work = new WorkState(this);
     this.preferences = new PromptPreferences(this.store);
     this.retention = new Retention(this);
+    this.magpie = new Magpie(this.store, changed);
     this.toolbox.resolve = ref => this.retrieval.sources.read(ref);
     this.tools = new DesktopTools({ store: this.store, jobs: this.jobs, todo: this.todo, taskHistory: this.taskHistory, maintenance: this.maintenance,
-      browser: this.browser, skills: this.skills, toolbox: this.toolbox, retrieval: this.retrieval, retention: this.retention, work: this.work });
+      browser: this.browser, skills: this.skills, toolbox: this.toolbox, retrieval: this.retrieval, retention: this.retention, work: this.work, magpie: this.magpie });
     this.notifications = new Notifications(this.store, changed, this.breathing);
-    this.agent = new AgentPool({ config, store: this.store, toolNames: [], changed });
+    this.agent = new AgentPool({ config, store: this.store, toolNames: [], changed, app: this });
     this.lanes = new Set(); this.stopped = false; this.taskRevision = 0;
   }
   async start() {
@@ -63,7 +65,7 @@ class DesktopApp {
     const d = this.store.data;
     const pendingChats = this.queue.peekForAccount("desktop")
       .filter(entry => JSON.parse(entry.text).background === false).map(entry => entry.id);
-    return { settings: d.settings, jobs: d.jobs, work: this.work.overview(), runs: d.runs.slice(-200).map(runSummary), messages: d.messages.slice(-300),
+    return { settings: d.settings, magpie: this.magpie.view(), jobs: d.jobs, work: this.work.overview(), runs: d.runs.slice(-200).map(runSummary), messages: d.messages.slice(-300),
       pendingChats, maintenance: this.maintenance.view(), breathing: this.breathing.view(),
       learnedSkills: this.skills.invoke({ action: "list" }),
       ...observationViews(d.observations), agent: this.agent.view(), taskService: { url: this.todo.url, error: this.todo.error },
