@@ -107,7 +107,7 @@ export default function Chat({ active }) {
   const notices = state.messages.filter(m => ['proactive','reminder'].includes(m.kind)).slice(-40).reverse();
   return <div className="chat-page" hidden={!active}>
     <AssistantRuntimeProvider runtime={runtime}><ThreadPrimitive.Root className="thread">
-      <div className="chat-topbar"><span><span className={`status-dot ${running ? 'working' : ''}`}/>{state.agent.approvals.length ? '等待你的处理' : running ? state.pendingChats.length && state.agent.background ? '等待后台任务结束' : '正在回复' : '随时可以开始'}</span><Button onClick={() => setInbox(!inbox)}><Bell size={16}/>提醒箱 {notices.filter(m=>m.unread).length || ''}</Button></div>
+      <div className="chat-topbar"><span><span className={`status-dot ${running ? 'working' : ''}`}/>{state.agent.approvals.length ? '等待你的处理' : running ? state.pendingChats.length && state.agent.background ? '准备回复' : '正在回复' : '随时可以开始'}</span><Button onClick={() => setInbox(!inbox)}><Bell size={16}/>提醒箱 {notices.filter(m=>m.unread).length || ''}</Button></div>
       <ThreadPrimitive.Viewport className="thread-viewport">
         {!messages.length && <div className="chat-welcome"><div className="welcome-icon"><Sparkles size={28}/></div><h2>一起把事情理清楚。</h2><p>聊聊计划、贴一张截图，或让我帮你跟进一件事。</p><div className="suggestions">{['看看最近还有什么没做的事','帮我安排接下来的一小时','帮我记住一件事'].map(text => <button key={text} className="secondary" onClick={() => runtime.thread.composer.setText(text)}>{text}</button>)}</div></div>}
         <ThreadPrimitive.Messages components={{ UserMessage:Message, AssistantMessage:Message, SystemMessage:Message }}/>
@@ -123,7 +123,7 @@ export default function Chat({ active }) {
           <div className="composer-actions"><ComposerPrimitive.AddAttachment className="icon-button" title="添加图片" aria-label="添加图片"><Paperclip size={19}/></ComposerPrimitive.AddAttachment><small>Enter 发送 · Shift+Enter 换行</small><span className="spacer"/>
             {running ? <ComposerPrimitive.Cancel className="send-button" disabled={sending || stopping} aria-label="停止回复" title="停止回复">{stopping ? <LoaderCircle size={18} className="spin"/> : <Square size={16}/>}</ComposerPrimitive.Cancel> : <ComposerPrimitive.Send className="send-button" aria-label="发送消息" title="发送消息"><ArrowUp size={20}/></ComposerPrimitive.Send>}
           </div>
-        </ComposerPrimitive.AttachmentDropzone></ComposerPrimitive.Root><p className="composer-caption">{!connected ? '本机服务未连接，草稿保留在当前页面' : state.agent.background ? 'Agent 正在后台工作，消息会接着处理' : '图片与对话保存在这台电脑 · 支持 PNG / JPEG / WebP'}</p>
+        </ComposerPrimitive.AttachmentDropzone></ComposerPrimitive.Root><p className="composer-caption">{!connected ? '本机服务未连接，草稿保留在当前页面' : state.agent.background ? '后台任务继续运行，可以在这里对话' : '图片与对话保存在这台电脑 · 支持 PNG / JPEG / WebP'}</p>
       </div>
     </ThreadPrimitive.Root></AssistantRuntimeProvider>
     {inbox && <aside className="inbox"><div className="section-heading"><h2>提醒箱</h2><button className="icon-button" aria-label="关闭提醒箱" onClick={() => setInbox(false)}><X size={18}/></button></div><p className="muted">只有值得告诉你的事才会出现在这里。</p>{notices.length ? notices.map(m => <Button key={m.id} className={`notice ${m.unread ? 'unread' : ''}`} onClick={() => openMessage(m.id)}><span>{m.text.slice(0,160)}</span><small>{fmt(m.createdAt)} · {m.unread ? '未读' : '已读'}{m.pushStatus === 'failed' ? ' · 推送失败，消息已保留' : ''}</small></Button>) : <Empty>有新提醒时会留在这里。</Empty>}</aside>}

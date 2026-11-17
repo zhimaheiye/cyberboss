@@ -10,7 +10,8 @@ async function main() {
   async function request(route, body) {
     const timeout = ['cb_maintenance', 'cb_browser', 'cb_recall', 'cb_toolbox'].includes(body?.name) ? 600000 : 45000;
     const response = await fetch(`${url.origin}${route}`, { method: body ? "POST" : "GET", signal: AbortSignal.timeout(timeout), redirect: "error",
-      headers: { Authorization: `Bearer ${endpoint.token}`, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+      headers: { Authorization: `Bearer ${endpoint.token}`, "Content-Type": "application/json",
+        "X-Cyberboss-Lane": process.argv[3] || process.env.CYBERBOSS_AGENT_LANE || '' }, body: body ? JSON.stringify(body) : undefined });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "工作台服务不可用");
     return data;

@@ -5,7 +5,8 @@ const { mapCodexMessageToRuntimeEvent } = require("../adapters/runtime/codex/eve
 const { recordEvent, finishProgress } = require("./run-progress");
 
 class DesktopAgent {
-  constructor({ config, store, toolNames, changed }) {
+  constructor({ config, store, toolNames, changed, lane = 'chat' }) {
+    this.lane = lane;
     this.config = config; this.store = store; this.changed = changed;
     this.active = null; this.approvals = []; this.models = []; this.toolNames = toolNames;
   }
@@ -13,10 +14,10 @@ class DesktopAgent {
     if (this.rpc) return this.rpc;
     this.rpc = new CodexRpcClient({
       codexCommand: this.config.codexCommand, extraWritableRoots: [this.store.dir],
-      env: { ...process.env, CYBERBOSS_DESKTOP_DIR: this.store.dir },
+      env: { ...process.env, CYBERBOSS_DESKTOP_DIR: this.store.dir, CYBERBOSS_AGENT_LANE: this.lane },
       // Own app-server, never attach to an unrelated process on a shared port.
       mcpServerConfig: { name: "cyberboss_desktop", command: process.execPath,
-        args: [path.resolve(__dirname, "tool-bridge.js"), this.store.dir], toolNames: this.toolNames, toolTimeoutSeconds: 600 },
+        args: [path.resolve(__dirname, "tool-bridge.js"), this.store.dir, this.lane], toolNames: this.toolNames, toolTimeoutSeconds: 600 },
     });
     const client = this.rpc;
     this.rpc.onMessage(message => { if (client === this.rpc) this.onMessage(message); });
@@ -68,6 +69,7 @@ class DesktopAgent {
     }, 15 * 60_000);
     try {
       const rpc = await this.initialize();
+      if (run?.cancelRequested) throw new Error('本次任务已取消');
       const model = this.store.data.settings.model;
       const catalogModel = model
         ? this.models.find(entry => entry.model === model || entry.id === model)
@@ -76,16 +78,18 @@ class DesktopAgent {
           && !catalogModel.inputModalities.includes("image")) {
         throw new Error("当前选择的模型不支持图片，请在设置里换一个支持图片的模型后重新发送");
       }
-      let threadId = this.store.data.threadId;
+      const sessions = this.store.data.sessionThreads ||= {};
+      const sessionKey = background ? (run?.jobId ? `job:${run.jobId}` : 'checkin') : 'chat';
+      let threadId = sessions[sessionKey];
       if (threadId) {
         await rpc.resumeThread({ threadId, model, modelProvider: "openai" });
       } else {
         const started = await rpc.startThread({ cwd: this.config.workspaceRoot, model, modelProvider: "openai" });
         threadId = started.result?.thread?.id || started.result?.threadId;
         if (!threadId) throw new Error("Codex 没有返回会话编号");
-        this.store.data.threadId = threadId; this.store.save();
+        sessions[sessionKey] = threadId; this.store.save();
       }
-      if (this.active !== active) throw new Error("本次任务已取消");
+      if (this.active !== active || run?.cancelRequested) throw new Error("本次任务已取消");
       active.threadId = threadId;
       if (run) { run.threadId = threadId; run.progress = { phase: "model", lastEventAt: new Date().toISOString() }; }
       const instructions = fs.readFileSync(path.resolve(__dirname, "../../templates/desktop-instructions.md"), "utf8");
@@ -93,7 +97,11 @@ class DesktopAgent {
         now: new Date().toISOString(), timezone: "Asia/Shanghai", mode: background ? "background" : "chat",
         browserMaintenance: this.store.data.maintenance?.policy,
         currentRun: run ? { id: run.id, jobId: run.jobId, kind: this.store.data.jobs.find(j => j.id === run.jobId)?.kind, reusableSkillVersion: run.skillVersion } : null,
-        recentMessages: this.store.data.messages.slice(-16).map(m => ({ role: m.role, text: m.text })),
+        lane: this.lane,
+        personalPreferences: this.store.data.promptPreferences?.versions?.at(-1)?.text || '',
+        workProgress: run?.jobId ? this.store.data.workStates?.[run.jobId] || null : null,
+        incomingEvents: run?.inputEvents || [],
+        recentMessages: background ? [] : this.store.data.messages.slice(-16).map(m => ({ role: m.role, text: m.text })),
         activeJobs: this.store.data.jobs.filter(j => j.status === "active"
           && !(Date.parse(j.suppressUntil) > Date.now()) && !(Date.parse(j.activeFrom) > Date.now()) && !(Date.parse(j.activeUntil) < Date.now())).map(j => ({
           id: j.id, title: j.title, kind: j.kind, contexts: j.contexts, nextRunAt: j.nextRunAt,

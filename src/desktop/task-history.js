@@ -12,15 +12,17 @@ class TaskHistory {
     store.data.taskEvents ||= [];
   }
   context(actor, args = {}) {
-    const run = actor === 'agent' ? this.store.data.runs.findLast(r => r.status === 'running') : null;
-    const message = run && !run.background ? this.store.data.messages.find(m => m.id === run.queueId && m.role === 'user') : null;
+    const run = actor === 'agent' ? require('./run-context').currentRun(this.store) : null;
     const quote = String(args.user_confirmation_quote || '').trim();
+    const incoming = run?.inputEvents?.find(e => e.actor === 'user' && quote && e.data?.text?.includes(quote));
+    const message = run && !run.background ? this.store.data.messages.find(m => m.id === run.queueId && m.role === 'user')
+      : incoming ? { id: incoming.id, text: incoming.data.text, createdAt: incoming.createdAt } : null;
     if (quote && (!message || quote.length < 2 || !message.text.includes(quote))) {
       throw new Error('用户确认必须引用当前对话中真实存在的用户原话；自主判断请只填写 completion_evidence');
     }
     return { actor: actor === 'user' ? 'user' : 'agent', basis: actor === 'user' ? 'direct' : quote ? 'user_statement' : 'ai_judgment',
       evidence: String(args.completion_evidence || '').slice(0, 6000),
-      runId: run?.id || null, messageId: message?.id || null,
+      runId: run?.id || null, messageId: incoming ? null : message?.id || null, inputEventId: incoming?.id || null,
       ...(quote ? { userQuote: quote, userStatementAt: message.createdAt } : {}) };
   }
   serial(work) {

@@ -4,7 +4,7 @@ import { api, Badge, useWorkbench } from './shared';
 
 function duration(ms) { if (!Number.isFinite(ms)) return '未知'; const s = Math.max(0, Math.floor(ms/1000)); return s < 60 ? `${s} 秒` : `${Math.floor(s/60)} 分 ${s%60} 秒`; }
 function timestamp(value) { return value ? new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(new Date(value)) : '未记录'; }
-const phases = { connecting:'正在连接 Codex',model:'等待 Agent 下一步输出',tool:'正在等待工具返回',approval:'等待你的批准或回答',response:'Agent 正在输出',finished:'本轮已结束' };
+const phases = { connecting:'正在连接 Codex',model:'等待 Agent 下一步输出',tool:'正在等待工具返回',browser_wait:'等待另一任务释放浏览器',approval:'等待你的批准或回答',response:'Agent 正在输出',finished:'本轮已结束' };
 export default function RunProgress({ run, expanded = false }) {
   const { connected }=useWorkbench(); const [open,setOpen]=useState(expanded),[detail,setDetail]=useState(null),[error,setError]=useState(''),[now,setNow]=useState(Date.now());
   useEffect(()=>{if(run.status!=='running')return;const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer);},[run.status]);
@@ -17,7 +17,7 @@ export default function RunProgress({ run, expanded = false }) {
   const elapsed=(running?now:Date.parse(run.finishedAt))-Date.parse(run.createdAt), idle=now-Date.parse(lastAt);
   return <section className="run-progress-panel">
     <div className="run-metrics"><span><Clock3 size={14}/>总用时 {duration(elapsed)}</span>{running&&<span>最近活动 {duration(idle)} 前</span>}{!connected&&running&&<span>连接已断开，状态可能过期</span>}</div>
-    {running&&<div className="run-current" role="status"><LoaderCircle size={15} className="spin"/><div><strong>{run.progress?.phase==='approval'?phases.approval:current.length?`正在执行：${current.map(s=>s.name).join('、')}`:phases[run.progress?.phase]||'执行中（旧版未记录当前步骤）'}</strong>{current.map(s=><p key={s.id}>{s.summary||s.name} · {duration(now-Date.parse(s.startedAt))}</p>)}</div></div>}
+    {running&&<div className="run-current" role="status"><LoaderCircle size={15} className="spin"/><div><strong>{['approval','browser_wait'].includes(run.progress?.phase)?phases[run.progress.phase]:current.length?`正在执行：${current.map(s=>s.name).join('、')}`:phases[run.progress?.phase]||'执行中（旧版未记录当前步骤）'}</strong>{current.map(s=><p key={s.id}>{s.summary||s.name} · {duration(now-Date.parse(s.startedAt))}</p>)}</div></div>}
     {running&&idle>60000&&<p className="progress-warning"><CircleAlert size={14}/>已超过 1 分钟没有新事件；可能在等待工具或模型，不代表已经确认卡死。</p>}
     {run.latestUpdate&&<p className="run-latest">{run.latestUpdate}</p>}
     {run.verification&&<div className={run.verification.status==='incomplete'?'alert error':'hint'}><strong>{run.verification.status==='incomplete'?'核验未完成':'核验结论'}</strong><p>{run.verification.summary}</p>{run.verification.recovery&&<p>恢复依据：{run.verification.recovery}</p>}{run.retryAt&&<p>本轮安排重试：{new Date(run.retryAt).toLocaleString('zh-CN')}（当前安排以作业卡片为准）</p>}</div>}

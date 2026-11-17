@@ -1,3 +1,10 @@
+.work-detail { display:grid; gap:24px; }
+.work-detail > section + section { border-top:1px solid var(--line); padding-top:20px; }
+.work-detail li { margin:8px 0; overflow-wrap:anywhere; }
+.work-detail li small { display:block; }
+.work-subscription,.work-event { border:1px solid var(--line); border-radius:12px; padding:14px; margin:12px 0; overflow-wrap:anywhere; }
+.work-detail details,.settings-wide details { margin-top:14px; }
+.work-detail summary,.settings-wide summary { cursor:pointer; }
 /* Answer book: the same workspace controls around a paper-and-cloth reading view. */
 .answer-workspace { max-width:1100px; margin:0 auto; }
 .answer-tabs { display:flex; align-items:center; gap:4px; padding:4px; border:1px solid var(--line); border-radius:12px; background:var(--surface); }

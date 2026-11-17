@@ -61,6 +61,8 @@ async function startDesktop(config) {
         }
         if (req.method === "GET" && url.pathname === "/api/state") return json(res, 200, app.view());
         if (req.method === 'GET' && url.pathname === '/api/retrieval') return json(res, 200, app.retrieval.view());
+        if (req.method === 'GET' && url.pathname === '/api/work') return json(res, 200, app.work.view(url.searchParams.get('jobId')));
+        if (req.method === 'GET' && url.pathname === '/api/preferences') return json(res, 200, app.preferences.view());
         if (req.method === "GET" && url.pathname === "/api/answer-book") return json(res, 200, app.answerBook.view());
         if (req.method === 'GET' && url.pathname === '/api/decision-guide') return json(res, 200, app.decisionGuide.view());
         if (req.method === 'GET' && url.pathname === '/api/decision-guide/reference') return json(res, 200, app.decisionGuide.reference(url.searchParams.get('name')));
@@ -83,6 +85,12 @@ async function startDesktop(config) {
         const body = await readBody(req, url.pathname === "/api/chat" ? CHAT_BODY_LIMIT : undefined);
         let result;
         switch (url.pathname) {
+          case '/api/work':
+            if (auth) throw new Error('Agent 请使用 cb_work 工具，保留当前执行归属');
+            result = await app.work.invoke(body, 'user'); break;
+          case '/api/preferences':
+            if (auth) throw new Error('个人偏好请由用户在设置页保存');
+            result = app.preferences.save(body); break;
           case '/api/retention':
             if (auth) throw new Error('保留策略请在工作台设置页修改');
             result = app.retention.configure(body); break;
@@ -98,7 +106,7 @@ async function startDesktop(config) {
           case '/api/decision-guide': return json(res, 200, app.decisionGuide.save(body));
           case "/api/chat": result = app.chat(body.text, body.images, body.requestId); break;
           case "/api/maintenance":
-            if (["check", "prepare_browser"].includes(body.action) && app.agent.active) throw new Error("Agent 正在执行任务；请让它在任务中自行维护，或等本轮结束后手动操作");
+            if (["check", "prepare_browser"].includes(body.action) && (app.agent.active || app.browser.owner)) throw new Error("Agent 正在执行任务；请让它在任务中自行维护，或等本轮结束后手动操作");
             if (body.action === "set_policy") result = app.maintenance.setPolicy(body.enabled);
             else result = await app.maintenance.invoke(body.action);
             break;
@@ -113,7 +121,10 @@ async function startDesktop(config) {
             if (body.action === "progress") return json(res, 200, result);
             break;
           case "/api/tool":
-            try { result = await app.tools.invokeTool(body.name, body.args, auth ? 'agent' : 'user'); }
+            try {
+              const run = auth ? app.agent.resolveRun(req.headers['x-cyberboss-lane']) : null;
+              result = await require('./run-context').withRun(run, () => app.tools.invokeTool(body.name, body.args, auth ? 'agent' : 'user'));
+            }
             finally {
               if (body.name?.startsWith("opentodo_") && !/^opentodo_(list|get|search|today)_/.test(body.name)) { app.taskRevision++; app.retrieval.sources.invalidateTasks(); changed(); }
             }
@@ -124,7 +135,10 @@ async function startDesktop(config) {
           case "/api/jobs/save": result = app.jobs.save(body, auth ? 'agent' : 'user'); break;
           case "/api/jobs/acknowledge": result = app.jobs.acknowledge(body, auth ? 'agent' : 'user'); break;
           case "/api/jobs/run": result = app.runJob(body.id); break;
-          case "/api/events": result = app.runJob(body.jobId, body.data); break;
+          case "/api/events": {
+            const events = app.work.emit({ ...body, source: body.source || 'external', key: body.key || require('crypto').randomUUID() }, auth ? 'external' : 'user');
+            result = { queued: events.length > 0, events }; break;
+          }
           case "/api/import": result = app.jobs.importHub(String(body.path || "D:\\personal-hub")); break;
           case "/api/push": result = app.notifications.subscribe(body); break;
           case "/api/read": {

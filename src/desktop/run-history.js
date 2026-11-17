@@ -11,7 +11,7 @@ async function readRunHistory(store, run, refresh = false) {
   const threadId = run.threadId || store.data.threadId;
   if (!/^[a-f0-9-]{36}$/i.test(threadId || '')) return run;
   const started = Date.parse(run.createdAt);
-  const nextRun = store.data.runs.find(r => Date.parse(r.createdAt) > started);
+  const nextRun = store.data.runs.find(r => r.threadId === run.threadId && Date.parse(r.createdAt) > started);
   const end = Math.min(Date.parse(run.finishedAt) || Infinity, Date.parse(nextRun?.createdAt) || Infinity);
   const root = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'sessions');
   const files = [];

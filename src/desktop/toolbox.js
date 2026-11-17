@@ -65,7 +65,7 @@ class Toolbox {
         fromTitle: from.title, toTitle: to.title, fromHash: from.hash, toHash: to.hash, reason, status,
         createdAt: old?.createdAt || now, updatedAt: now, proposedBy: old?.proposedBy || actor,
         history: [...(old?.history || []), { at: now, actor, status, reason,
-          runId: actor === 'agent' ? this.store.data.runs.findLast(r => r.status === 'running')?.id || null : null }] };
+          runId: actor === 'agent' ? require('./run-context').currentRun(this.store)?.id || null : null }] };
       if (old) current.links[current.links.indexOf(old)] = link; else current.links.push(link);
       this.save(current); return { saved: true, link };
     }

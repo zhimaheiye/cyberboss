@@ -50,8 +50,11 @@ class SearchSources {
         if (source === 'tool') for (const t of a.toolbox.load().tools) push(source, t.id, t.title,
           [t.description, `适用场景：${t.whenToUse}`, `限制：${t.constraints}`, `入口：${t.locator}`, `状态：${t.availability}`, ...t.tags, ...t.aliases].join('\n'), t.updatedAt, 'tools', t.archived);
         if (source === 'job') for (const j of d.jobs) push(source, j.id, j.title,
-          [j.instructions, j.notificationText, j.contexts, `状态：${j.status}`, JSON.stringify(j.schedule), j.blocker?.evidence].filter(Boolean).join('\n'), j.createdAt, 'jobs', j.status === 'done');
+          [j.instructions, j.notificationText, j.contexts, `状态：${j.status}`, JSON.stringify(j.schedule), j.blocker?.evidence,
+            d.workStates?.[j.id] && `持续进展：${JSON.stringify(d.workStates[j.id])}`].filter(Boolean).join('\n'), d.workStates?.[j.id]?.updatedAt || j.createdAt, 'jobs', j.status === 'done');
         if (source === 'event') for (const e of d.observations) push(source, e.id, e.text.slice(0, 60), `${e.text}\n记录分类：${observationKind(e) === 'execution' ? 'Agent 执行记录' : '生活观察'}\n来源：${e.source}\n依据类型：${e.evidence}`, e.observedAt, 'timeline');
+        if (source === 'event') for (const e of d.workEvents || []) push(source, `work-${e.id}`, d.jobs.find(j => j.id === e.jobId)?.title || '托管事项事件',
+          JSON.stringify({ kind: e.kind, actor: e.actor, source: e.source, data: e.data, progress: e.progress, outcome: e.outcome }), e.createdAt, 'jobs');
         if (source === 'chat') for (const m of d.messages) push(source, m.id, `${m.role} · ${m.kind || '对话'}`, [m.text, ...(m.images || []).map(i => `图片附件：${i.name || i.id}（仅附件名称参与文本检索）`)].filter(Boolean).join('\n'), m.createdAt, 'chat');
         if (source === 'note') {
           const dir = path.join(a.store.dir, 'memory');

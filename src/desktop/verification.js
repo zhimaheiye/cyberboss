@@ -2,7 +2,7 @@ const { preview } = require('./run-progress');
 
 // Persist observations, not private reasoning. A tool transport completing is not a check result.
 function recordAttempt(store, args) {
-  const run = store.data.runs.findLast(r => r.status === 'running');
+  const run = require('./run-context').currentRun(store);
   if (!run?.background || !run.jobId) throw new Error('核验记录只能写入当前后台作业');
   if (!['succeeded', 'failed', 'inconclusive'].includes(args.status)
     || !args.method?.trim() || !args.target?.trim() || !args.detail?.trim()) {

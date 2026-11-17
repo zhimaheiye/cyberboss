@@ -32,6 +32,11 @@ class Retention {
     }
     for (const r of latest.values()) protectedRuns.add(r.id);
     for (const skill of Object.values(d.learnedSkills || {})) for (const version of skill.versions || []) protectedRuns.add(version.sourceRunId);
+    for (const e of d.workEvents || []) if (e.kind === 'progress' || e.actor === 'user') {
+      if (e.runId) protectedRuns.add(e.runId);
+      for (const fact of e.progress?.facts || []) if (fact.source) protectedRefs.add(fact.source);
+    }
+    for (const s of d.workSubscriptions || []) if (s.kind === 'reference') protectedRefs.add(s.target);
     for (const item of [...(d.taskEvents || []), ...d.messages]) if (item.runId) protectedRuns.add(item.runId);
     for (const job of d.jobs) if (job.blocker?.sourceRunId) protectedRuns.add(job.blocker.sourceRunId);
     for (const link of app.toolbox.load().links) {
@@ -66,15 +71,17 @@ class Retention {
     });
     const runIds = new Set(removable.map(r => r.id));
     const observations = d.observations.filter(o => runIds.has(observationRuns.get(o.id)));
-    const refs = new Set([...removable.map(r => ref('run', r.id)), ...observations.map(o => ref('event', o.id))]);
+    const workEvents = (d.workEvents || []).filter(e => e.kind === 'input' && e.actor !== 'user' && e.delivery === 'delivered'
+      && runIds.has(e.runId) && !protectedRefs.has(ref('event', `work-${e.id}`)));
+    const refs = new Set([...removable.map(r => ref('run', r.id)), ...observations.map(o => ref('event', o.id)), ...workEvents.map(e => ref('event', `work-${e.id}`))]);
     const byJob = new Map();
     for (const r of removable) {
       const key = r.jobId || 'checkin', item = byJob.get(key) || { jobId: r.jobId || null, runs: 0, firstAt: r.createdAt, lastAt: r.finishedAt };
       item.runs++; if (r.createdAt < item.firstAt) item.firstAt = r.createdAt; if (r.finishedAt > item.lastAt) item.lastAt = r.finishedAt;
       byJob.set(key, item);
     }
-    return { runIds, observationIds: new Set(observations.map(o => o.id)), refs,
-      summary: { runs: removable.length, observations: observations.length,
+    return { runIds, observationIds: new Set(observations.map(o => o.id)), workEventIds: new Set(workEvents.map(e => e.id)), refs,
+      summary: { runs: removable.length, observations: observations.length, workEvents: workEvents.length,
         vectors: Object.values(app.retrieval.index.rows).filter(row => refs.has(row.ref)).length,
         byJob: [...byJob.values()], cutoff: new Date(cutoff).toISOString() } };
   }
@@ -84,7 +91,7 @@ class Retention {
     // Run only on the workbench's idle loop. In-flight indexing could otherwise
     // write a stale snapshot back after pruning.
     if (app.agent.active || app.pumping || app.retrieval.progress.busy || app.queue.hasPendingForAccount('desktop')) return;
-    const d = app.store.data, oldRuns = d.runs, oldObservations = d.observations, oldPolicy = d.retention;
+    const d = app.store.data, oldRuns = d.runs, oldObservations = d.observations, oldWorkEvents = d.workEvents, oldPolicy = d.retention;
     try {
       const plan = this.plan(now), at = new Date(now).toISOString();
       // Prune derived data first. If saving originals fails, their arrays are
@@ -92,6 +99,7 @@ class Retention {
       const vectors = app.retrieval.removeRefs(plan.refs);
       d.runs = d.runs.filter(r => !plan.runIds.has(r.id));
       d.observations = d.observations.filter(o => !plan.observationIds.has(o.id));
+      d.workEvents = (d.workEvents || []).filter(e => !plan.workEventIds.has(e.id));
       const summary = { ...plan.summary, vectors, at };
       d.retention = { ...policy, lastCheckedAt: at, requestedAt: null, error: '',
         ...(summary.runs ? { lastCleanupAt: at, lastSummary: summary,
@@ -101,7 +109,7 @@ class Retention {
             vectors: (policy.totals?.vectors || 0) + vectors } } : {}) };
       app.store.save(); app.changed();
     } catch (error) {
-      d.runs = oldRuns; d.observations = oldObservations; d.retention = oldPolicy;
+      d.runs = oldRuns; d.observations = oldObservations; d.workEvents = oldWorkEvents; d.retention = oldPolicy;
       d.retention = { ...policy, lastCheckedAt: new Date(now).toISOString(), requestedAt: null, error: error.message };
       try { app.store.save(); } catch { /* Keep original records in memory and retry on the next daily check. */ }
       app.changed();

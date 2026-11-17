@@ -4,8 +4,52 @@ const crypto = require('crypto');
 const { isReady } = require('./maintenance');
 const ACTIONS = ['navigate','find_tab','snapshot','find','read_page','wait','send_keys','mouse_click','click','fill','evaluate','screenshot','save_as_pdf','list_tabs','list_browser_tabs','attach_tab','close_tab','close_session','network','upload','cdp'];
 class BrowserBridge {
-  constructor(store, maintenance) { this.store = store; this.maintenance = maintenance; }
-  async command({ action, args = {}, session }) {
+  constructor(store, maintenance, changed = () => {}) { this.store = store; this.maintenance = maintenance; this.changed = changed; this.waiters = new Set(); this.tail = Promise.resolve(); }
+  async acquire() {
+    const run = require('./run-context').currentRun(this.store);
+    if (!run) throw new Error('浏览器操作需要当前执行上下文');
+    const deadline = Date.now() + 8 * 60000;
+    while (this.owner && this.owner !== run.id) {
+      if (run.cancelRequested || run.status !== 'running') throw new Error('等待浏览器时执行已结束');
+      if (Date.now() >= deadline) throw new Error('浏览器仍由另一任务使用，本次动作尚未发送');
+      if (run.progress?.phase !== 'browser_wait') {
+        run.progress = { phase: 'browser_wait', lastEventAt: new Date().toISOString() }; this.store.save(); this.changed();
+      }
+      await new Promise(resolve => {
+        const wake = () => { clearTimeout(timer); this.waiters.delete(wake); resolve(); };
+        const timer = setTimeout(wake, 1000); this.waiters.add(wake);
+      });
+    }
+    if (run.cancelRequested || run.status !== 'running') throw new Error('本次执行已结束');
+    this.owner = run.id;
+    if (run.progress?.phase === 'browser_wait') { run.progress = { phase: 'tool', lastEventAt: new Date().toISOString() }; this.changed(); }
+    return run;
+  }
+  async release(id) {
+    if (this.owner !== id) return;
+    await this.tail;
+    if (this.owner === id) { this.owner = null; for (const wake of [...this.waiters]) wake(); }
+  }
+  async maintain(action) {
+    if (!['check', 'prepare_browser'].includes(action)) return this.maintenance.invoke(action);
+    const run = await this.acquire();
+    const result = this.tail.then(() => {
+      if (run.cancelRequested || run.status !== 'running') throw new Error('本次执行已结束，维护尚未开始');
+      return this.maintenance.invoke(action);
+    });
+    this.tail = result.catch(() => {}); return result;
+  }
+  command(input) {
+    // Acquire before joining the command queue: a waiting lane must not block its owner.
+    return this.acquire().then(run => {
+      const result = this.tail.then(() => {
+        if (run.cancelRequested || run.status !== 'running') throw new Error('本次执行已结束，浏览器动作未发送');
+        return this.dispatch(input);
+      });
+      this.tail = result.catch(() => {}); return result;
+    });
+  }
+  async dispatch({ action, args = {}, session }) {
     if (!ACTIONS.includes(action)) throw new Error('不支持的 Kimi 浏览器动作');
     if (!/^[a-zA-Z0-9_-]{1,100}$/.test(session || '')) throw new Error('请提供稳定的任务 session 名称');
     // A cached five-second startup snapshot used to reject healthy connections
