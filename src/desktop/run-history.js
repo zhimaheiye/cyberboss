@@ -26,6 +26,7 @@ async function readRunHistory(store, run, refresh = false) {
     }
   };
   visit(root);
+  if (!files.length) visit(path.join(path.dirname(root), 'archived_sessions'));
   const recovered = { ...run, steps:[], updates:[], detailSource:'codex-session' };
   const calls = new Map();
   for (const file of files) {

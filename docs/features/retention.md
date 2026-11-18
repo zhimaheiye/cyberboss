@@ -34,3 +34,17 @@
 后端 `src/desktop/retention.js`，接入 `app.js` 的 tick、`tools.js` 的 `cb_retention`、`server.js` 的策略接口和 `retrieval.js` 的本机向量删除。前端 `web/src/RetentionSettings.jsx`。
 
 策略与统计在项目数据目录 `desktop.json` 的 `retention` 字段中，不上传源码仓库。该批只完成代码与文档，读取过本机各来源数量用于定位；未执行清理、未调用真实向量接口、未重启服务，未运行测试、构建或浏览器验证。
+
+## Codex 会话命名与自动归档（2026-11-18）
+
+- 工作台会话分别命名为 `CyberBoss · 主对话`、`CyberBoss · 自然唤醒`、`CyberBoss · 任务名称`。新会话在首轮结束后命名，已有会话在后台日检查中补齐；任务改名后同步名称。
+- 只登记本机工作台保存的 `sessionThreads`、旧版 `threadId` 与执行记录中的会话编号。不会凭标题相似或同属一个目录管理其它 Codex 对话；已丢失编号的旧会话不自动接管。
+- 独立于巡检流水保留开关，每 24 小时在工作台和队列空闲时检查一次，无须调用生成模型。已替换、所属任务已删除或明确标记 `done` 的会话，距离工作台记录与 Codex 元数据中较新的活动时间至少 7 天后归档。
+- 当前主对话、自然唤醒，以及仍需复用的任务会话保留。暂停、阻塞、草稿或暂时超出执行时间窗口都不视为任务结束。归档检查期间执行队列等待，新的用户请求使维护在当前 RPC 完成后让出执行。
+- 使用 Codex 的归档接口保留会话原文，不直接删除文件。工作台读取执行详情时同时查找 `sessions` 与 `archived_sessions`。已完成任务若被用户重新启用，执行前恢复对应已归档会话，再继续复用。
+- 每次实际归档后立即保存状态；若进程在归档成功与保存之间退出，下次通过原始会话路径核对。接口失败记录具体原因，下一次日检查重试；单个会话失败不阻止其它会话。
+- 设置页「巡检记录保留」下显示会话整理数量、检查时间、最近 30 批统计与错误。登记、命名和归档状态保存在本机 `desktop.json` 的 `threadMaintenance`，属于运行数据。
+
+实现：`src/desktop/thread-maintenance.js`，接入 `app.js` 的后台循环、执行队列和退出流程；`agent.js` 登记与命名，`run-history.js` 保留归档后的详情读取，`RetentionSettings.jsx` 展示维护状态。
+
+协议依据：[Codex 官方 App Server 协议](https://github.com/openai/codex/blob/main/codex-rs/app-server-protocol/src/protocol/common.rs)，使用 `thread/read`、`thread/name/set`、`thread/archive`、`thread/unarchive`。本批仅完成源码与文档；未运行测试、构建、浏览器验证或真实归档，未重启服务。实际侧边栏刷新、归档恢复和本机 Codex 版本兼容性待加载后验收。

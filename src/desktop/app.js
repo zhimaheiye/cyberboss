@@ -18,6 +18,7 @@ const { DecisionGuide } = require('./decision-guide');
 const { Toolbox } = require('./toolbox');
 const { Retrieval } = require('./retrieval');
 const { Retention } = require('./retention');
+const { ThreadMaintenance } = require('./thread-maintenance');
 const { Maintenance } = require("./maintenance");
 const { runSummary } = require("./run-progress");
 const { readRunHistory } = require('./run-history');
@@ -43,6 +44,7 @@ class DesktopApp {
     this.work = new WorkState(this);
     this.preferences = new PromptPreferences(this.store);
     this.retention = new Retention(this);
+    this.threadMaintenance = new ThreadMaintenance(this);
     this.magpie = new Magpie(this.store, changed);
     this.toolbox.resolve = ref => this.retrieval.sources.read(ref);
     this.tools = new DesktopTools({ store: this.store, jobs: this.jobs, todo: this.todo, taskHistory: this.taskHistory, maintenance: this.maintenance,
@@ -72,7 +74,8 @@ class DesktopApp {
       memoryDir: path.join(this.store.dir, "memory"), stateDir: this.store.dir, error: this.error || "",
       pushPublicKey: d.vapid?.publicKey, nextCheckinAt: d.nextCheckinAt, quiet: this.notifications.isQuiet(),
       pending: this.queue.peekForAccount("desktop").length, taskRevision: this.taskRevision, taskHistoryRevision: d.taskEvents.length,
-      toolboxRevision: this.toolbox.revision, indexing: this.retrieval.progress, retention: this.retention.view() };
+      toolboxRevision: this.toolbox.revision, indexing: this.retrieval.progress, retention: this.retention.view(),
+      threadMaintenance: this.threadMaintenance.view() };
   }
   enqueue(text, { jobId = "", id = crypto.randomUUID(), background = true } = {}) {
     if (background && jobId && (this.agent.hasJob(jobId) || this.queue.peekForAccount("desktop").some(m => JSON.parse(m.text).jobId === jobId))) return;
@@ -134,6 +137,8 @@ class DesktopApp {
   }
   async tick() {
     if (this.stopped) return;
+    // Register legacy IDs before normal run retention can discard their references.
+    this.threadMaintenance.discover();
     this.retention.tick();
     this.noticeJobExceptions();
     const now = Date.now();
@@ -169,6 +174,7 @@ class DesktopApp {
     }
     void this.notifications.flush().catch(error => { this.error = error.message; this.changed(); });
     void this.pump();
+    void this.threadMaintenance.tick().catch(error => { this.error = error.message; this.changed(); });
   }
   noticeJobExceptions() {
     for (const job of this.jobs.list().filter(j => j.status === 'blocked')) {
@@ -187,7 +193,7 @@ class DesktopApp {
   get pumping() { return this.lanes.size > 0; }
   async pump() { await Promise.all([this.pumpLane(false), this.pumpLane(true)]); }
   async pumpLane(background) {
-    if (this.lanes.has(background) || this.stopped) return;
+    if (this.lanes.has(background) || this.stopped || this.threadMaintenance.busy) return;
     this.lanes.add(background);
     let execution, advanced = false;
     try {
@@ -304,6 +310,7 @@ class DesktopApp {
   async close() {
     this.stopped = true; clearInterval(this.timer);
     this.retrieval.cancel();
+    await this.threadMaintenance.close();
     await this.agent.cancel(); this.todo.close();
   }
 }

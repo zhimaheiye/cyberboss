@@ -5,7 +5,8 @@ const { mapCodexMessageToRuntimeEvent } = require("../adapters/runtime/codex/eve
 const { recordEvent, finishProgress } = require("./run-progress");
 
 class DesktopAgent {
-  constructor({ config, store, toolNames, changed, lane = 'chat' }) {
+  constructor({ config, store, toolNames, changed, app, lane = 'chat' }) {
+    this.threadMaintenance = app?.threadMaintenance;
     this.lane = lane;
     this.config = config; this.store = store; this.changed = changed;
     this.active = null; this.approvals = []; this.models = []; this.toolNames = toolNames;
@@ -82,12 +83,14 @@ class DesktopAgent {
       const sessionKey = background ? (run?.jobId ? `job:${run.jobId}` : 'checkin') : 'chat';
       let threadId = sessions[sessionKey];
       if (threadId) {
+        await this.threadMaintenance?.prepare(rpc, threadId, sessionKey);
         await rpc.resumeThread({ threadId, model, modelProvider: "openai" });
       } else {
         const started = await rpc.startThread({ cwd: this.config.workspaceRoot, model, modelProvider: "openai" });
         threadId = started.result?.thread?.id || started.result?.threadId;
         if (!threadId) throw new Error("Codex 没有返回会话编号");
         sessions[sessionKey] = threadId; this.store.save();
+        await this.threadMaintenance?.prepare(rpc, threadId, sessionKey);
       }
       if (this.active !== active || run?.cancelRequested) throw new Error("本次任务已取消");
       active.threadId = threadId;
@@ -123,6 +126,7 @@ class DesktopAgent {
       clearTimeout(timer);
       clearTimeout(this.progressTimer); this.progressTimer = null;
       finishProgress(run, run?.cancelRequested ? "cancelled" : "interrupted");
+      if (active.threadId) await this.threadMaintenance?.finished(this.rpc, active.threadId);
       if (run) this.store.save();
       this.active = null; this.approvals = []; this.changed();
     }
