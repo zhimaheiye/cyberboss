@@ -77,9 +77,9 @@ export default function Chat({ active }) {
       const run = state.runs.find(r => r.queueId === message.id);
       return { ...message, delivery: state.pendingChats.includes(message.id) ? '排队中' : run ? labels[run.status] || run.status : '', steps: run?.steps };
     });
-    if (state.agent.busy && !state.agent.background) items.push({ id:`stream-${state.agent.startedAt}`, role:'assistant', text:state.agent.text, createdAt:state.agent.startedAt, streaming:true });
+    if (state.agent.busy && !state.agent.background) items.push({ id:`stream-${state.agent.startedAt}`, role:'assistant', text:state.agent.text || activeRun?.latestUpdate, createdAt:state.agent.startedAt, streaming:true });
     return items;
-  }, [state.messages, state.runs, state.pendingChats, state.agent]);
+  }, [state.messages, state.runs, state.pendingChats, state.agent, activeRun]);
   const adapter = useMemo(() => createAttachmentAdapter(toast), [toast]);
   const runtime = useExternalStoreRuntime({ messages, convertMessage, isRunning:running, isSendDisabled:!connected || running,
     adapters:{ attachments:adapter },
@@ -113,7 +113,7 @@ export default function Chat({ active }) {
         <ThreadPrimitive.Messages components={{ UserMessage:Message, AssistantMessage:Message, SystemMessage:Message }}/>
         {sending && <p className="chat-progress"><LoaderCircle size={16} className="spin"/>正在发送…</p>}
         {!sending && state.pendingChats.length > 0 && <p className="chat-progress"><LoaderCircle size={16} className="spin"/>消息已收到，正在等待执行</p>}
-        {activeRun && <RunProgress run={activeRun}/>}
+        {activeRun && <RunProgress run={activeRun} showLatestUpdate={false}/>}
         {state.agent.approvals.map(a => <Approval key={a.requestId} approval={a}/>)}
       </ThreadPrimitive.Viewport>
       <div className="composer-dock"><ThreadPrimitive.ScrollToBottom className="scroll-latest secondary" aria-label="回到最新消息"><ArrowDown size={16}/>最新消息</ThreadPrimitive.ScrollToBottom>
