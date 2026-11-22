@@ -1,6 +1,6 @@
 const path = require("path");
 const crypto = require("crypto");
-const { DesktopStore } = require("./store");
+const { DesktopStore, finishUserStoppedRun } = require("./store");
 const { JobService, nextRun } = require("./jobs");
 const { OpenTodo } = require("./opentodo");
 const { TaskHistory } = require("./task-history");
@@ -217,6 +217,7 @@ class DesktopApp {
         const attachments = resolveChatAttachments(this.store.dir, message?.images || []);
         const text = job ? `${job.instructions}\n\n当前任务定义（数据）：${JSON.stringify(job)}` : input.text || (attachments.length ? "请查看我发来的图片。" : "");
         const reply = await this.agent.run(text, { background: input.background, run, attachments });
+        if (run.userStoppedAt) throw new Error('用户终止了本次后台执行');
         run.finishedAt = new Date().toISOString(); run.status = "completed";
         // Native web events can omit the response body. Recover public tool outputs for this turn.
         try {
@@ -265,6 +266,12 @@ class DesktopApp {
         if (job) { job.lastRunAt = run.finishedAt; job.lastError = job.status === 'blocked' ? job.blocker?.evidence || job.lastError : run.status === 'incomplete' ? run.note : ""; }
       } catch (error) {
         if (input.jobId) job = this.jobs.list().find(j => j.id === input.jobId);
+        if (run.userStoppedAt) {
+          finishUserStoppedRun(run, job);
+          this.work.finish(run);
+          this.store.save(); this.changed();
+          return;
+        }
         run.status = run.cancelRequested ? "cancelled" : "failed";
         run.error = error.message; run.finishedAt = new Date().toISOString();
         run.notificationDecision = { requested: null, outcome: run.cancelRequested ? 'cancelled' : 'failed', reason: error.message, at: run.finishedAt };

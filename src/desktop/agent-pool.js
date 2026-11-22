@@ -52,6 +52,20 @@ class AgentPool {
   }
   async login() { if (this.active) throw new Error('请等当前执行结束后登录'); return this.chat.login(); }
   refreshModels() { return this.chat.refreshModels(); }
+  async stopBackgroundRun(id) {
+    if (!id) throw new Error('缺少后台执行编号');
+    const worker = [this.magpie, this.background].find(agent => agent.active?.run?.id === id);
+    if (!worker || worker.active.run.status !== 'running') throw new Error('这次后台执行已经结束，请刷新执行记录');
+    const run = worker.active.run;
+    if (!run.userStoppedAt) {
+      run.userStoppedAt = new Date().toISOString();
+      run.cancelRequested = true;
+      this.app.store.save();
+      this.app.changed();
+      await worker.cancel();
+    }
+    return { runId: id, requested: true };
+  }
   cancel() { return Promise.all([this.chat.cancel(), this.background.cancel(), this.magpie.cancel()]); }
   view() {
     const foreground = this.chat.view(), background = this.magpie.active ? this.magpie.view() : this.background.view();

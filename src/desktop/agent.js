@@ -120,7 +120,7 @@ class DesktopAgent {
       return await completion;
     } catch (error) {
       // Terminate our own runtime on uncertain outcomes; do not start a second overlapping turn.
-      await this.rpc?.close(); this.rpc = null;
+      await (active.closing || this.rpc?.close()); this.rpc = null;
       throw error;
     } finally {
       clearTimeout(timer);
@@ -186,11 +186,14 @@ class DesktopAgent {
     if (this.active?.run) { this.active.run.progress = { phase: this.approvals.length ? "approval" : "model", lastEventAt: new Date().toISOString() }; this.saveProgress(); }
   }
   async cancel() {
-    if (this.active) {
-      if (this.active.run) this.active.run.cancelRequested = true;
-      this.active.fail(new Error("用户已停止本次执行；已发生的动作请从记录核对"));
+    const active = this.active, rpc = this.rpc;
+    if (active) {
+      if (active.run) active.run.cancelRequested = true;
+      active.closing ||= rpc?.close();
+      active.fail(new Error("用户已停止本次执行；已发生的动作请从记录核对"));
     }
-    await this.rpc?.close(); this.rpc = null;
+    await (active?.closing || rpc?.close());
+    if (this.rpc === rpc) this.rpc = null;
   }
   view() {
     return { busy: !!this.active, background: this.active?.background, startedAt: this.active?.startedAt,

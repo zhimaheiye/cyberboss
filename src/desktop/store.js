@@ -9,6 +9,15 @@ function writeJson(file, value) {
   fs.renameSync(temp, file);
 }
 
+function finishUserStoppedRun(run, job) {
+  run.status = 'cancelled';
+  run.finishedAt = new Date().toISOString();
+  run.note = '用户终止了本次后台执行';
+  run.notificationDecision = { requested: null, outcome: 'cancelled', reason: run.note, at: run.finishedAt };
+  require('./run-progress').finishProgress(run, 'cancelled');
+  if (job?.verificationRetry) { delete job.verificationRetry; job.version++; }
+}
+
 class DesktopStore {
   constructor(dir) {
     this.dir = dir;
@@ -21,6 +30,10 @@ class DesktopStore {
     this.data.apiToken ||= crypto.randomBytes(32).toString("hex");
     // Never automatically replay a possibly side-effecting interrupted run.
     for (const run of this.data.runs.filter(r => r.status === "running")) {
+      if (run.userStoppedAt) {
+        finishUserStoppedRun(run, this.data.jobs.find(j => j.id === run.jobId));
+        continue;
+      }
       run.status = "interrupted";
       run.error = "进程退出，执行结果尚未确认；请检查记录后再运行。";
       require("./run-progress").finishProgress(run);
@@ -66,4 +79,4 @@ class DesktopStore {
     return { name, saved: true };
   }
 }
-module.exports = { DesktopStore, writeJson };
+module.exports = { DesktopStore, writeJson, finishUserStoppedRun };

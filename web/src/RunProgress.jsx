@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { LoaderCircle, Clock3, CircleAlert } from 'lucide-react';
-import { api, Badge, useWorkbench } from './shared';
+import { api, Badge, Button, useWorkbench } from './shared';
 
 function duration(ms) { if (!Number.isFinite(ms)) return '未知'; const s = Math.max(0, Math.floor(ms/1000)); return s < 60 ? `${s} 秒` : `${Math.floor(s/60)} 分 ${s%60} 秒`; }
 function timestamp(value) { return value ? new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(new Date(value)) : '未记录'; }
@@ -16,6 +16,7 @@ export default function RunProgress({ run, expanded = false, showLatestUpdate = 
   const running=run.status==='running', current=run.steps?.filter(s=>s.status==='running')||[], lastAt=run.progress?.lastEventAt||run.steps?.at(-1)?.at||run.createdAt;
   const elapsed=(running?now:Date.parse(run.finishedAt))-Date.parse(run.createdAt), idle=now-Date.parse(lastAt);
   return <section className="run-progress-panel">
+    {running && run.background && <StopBackgroundRun run={run}/>}
     {run.routing&&<div className="hint"><strong>本轮执行：{run.routing.selected==='magpie'?'Magpie':'Codex'}{run.routing.model?` · ${run.routing.model}`:''}{run.routing.fallback?' → Codex':''}</strong><p>{run.routing.reason}</p>{run.routing.fallback&&<p>交接原因：{run.routing.fallback.reason}</p>}{run.routing.requests>0&&<small>Magpie 请求 {run.routing.requests} 次{run.routing.usage?.total_tokens?` · 返回用量 ${run.routing.usage.total_tokens} tokens`:''}</small>}</div>}
     <div className="run-metrics"><span><Clock3 size={14}/>总用时 {duration(elapsed)}</span>{running&&<span>最近活动 {duration(idle)} 前</span>}{!connected&&running&&<span>连接已断开，状态可能过期</span>}</div>
     {running&&<div className="run-current" role="status"><LoaderCircle size={15} className="spin"/><div><strong>{['approval','browser_wait'].includes(run.progress?.phase)?phases[run.progress.phase]:current.length?`正在执行：${current.map(s=>s.name).join('、')}`:phases[run.progress?.phase]||'执行中（旧版未记录当前步骤）'}</strong>{current.map(s=><p key={s.id}>{s.summary||s.name} · {duration(now-Date.parse(s.startedAt))}</p>)}</div></div>}
@@ -36,4 +37,12 @@ export default function RunProgress({ run, expanded = false, showLatestUpdate = 
       <p className="progress-footnote">记录展示操作与工具结果，不包含模型私有推理。敏感字段会遮盖，长内容会截断。执行完成不等于业务操作成功。</p></>:!error&&<p className="muted">正在读取详细记录…</p>}
     </details>
   </section>;
+}
+
+export function StopBackgroundRun({ run }) {
+  const { refresh, connected } = useWorkbench();
+  return <Button disabled={!connected || run.cancelRequested} onClick={async () => {
+    try { await api('run/cancel', { id: run.id }); }
+    finally { await refresh(); }
+  }}>{run.cancelRequested ? '正在终止…' : '终止本次执行'}</Button>;
 }

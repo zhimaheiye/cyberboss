@@ -118,6 +118,9 @@ async function startDesktop(config) {
             else result = await app.maintenance.invoke(body.action);
             break;
           case "/api/chat/cancel": result = await app.cancelChat(); break;
+          case "/api/run/cancel":
+            if (auth) throw new Error('请在工作台中终止本次执行');
+            result = await app.agent.stopBackgroundRun(body.id); break;
           case "/api/cancel": await app.agent.cancel(); result = { stopped: true }; break;
           case "/api/approval": await app.agent.approve(body.id, body.accept === true, body.answers); result = { answered: true }; break;
           case "/api/login": result = await app.agent.login(); break;
