@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const { withRun } = require('./run-context');
 const { recordEvent, finishProgress, preview } = require('./run-progress');
 // Use the existing workbench tools; Codex-only MCP plugins stay with Codex.
-const TOOLS = new Set(['cb_recall','cb_work','cb_verification','cb_browser','cb_maintenance','cb_skills','cb_memory','cb_observe','cb_task_history','cb_toolbox']);
+const TOOLS = new Set(['cb_work','cb_verification','cb_browser','cb_maintenance','cb_skills','cb_observe','cb_task_history','cb_toolbox']);
 class MagpieAgent {
   constructor(app) { this.app = app; this.active = null; this.approvals = []; }
   view() { return { busy: !!this.active, background: true, startedAt: this.active?.startedAt, text: '', approvals: [], models: [] }; }
@@ -24,8 +24,7 @@ class MagpieAgent {
       const seenCalls = new Set();
       const messages = [{ role: 'system', content: `${instructions}\n\n本轮通过 Magpie API 执行，使用传入的 function tools。仅操作当前 job，不能改变执行者、模型配置或自动恢复任务。需要目录外工具、任意本地文件或系统操作时，返回 {"action":"handoff","reason":"具体缺口"} 交回 Codex。cb_work 仅开放 read/report；工具箱仅开放 list/get/related。当前浏览器技能参考：\n${browserGuide}\n工作台工具的传输与排队要求仍适用。` },
         { role: 'user', content: `${text}\n\n上下文数据：${JSON.stringify({ now: new Date().toISOString(), currentRun: { id: run.id, jobId: run.jobId },
-          progress: app.work.state(run.jobId), inputEvents: run.inputEvents || [], reusableSkill: skill,
-          personalPreferences: app.store.data.promptPreferences?.versions?.at(-1)?.text || '' })}` }];
+          progress: app.work.state(run.jobId), inputEvents: run.inputEvents || [], reusableSkill: skill })}` }];
       for (let round = 0; round < c.maxRounds; round++) {
         if (run.cancelRequested || controller.signal.aborted) throw new Error('Magpie 执行已停止或达到时限');
         const job = app.jobs.list().find(j => j.id === run.jobId);

@@ -86,6 +86,12 @@ async function startDesktop(config) {
         const body = await readBody(req, url.pathname === "/api/chat" ? CHAT_BODY_LIMIT : undefined);
         let result;
         switch (url.pathname) {
+          case '/api/moraine':
+            if (auth) throw new Error('请在工作台设置页管理 Moraine');
+            if (body.action === 'start') { app.moraine.start(); result = app.moraine.view(); }
+            else if (body.action === 'access' && app.moraine.status === 'ready') result = { token: app.moraine.accessToken() };
+            else throw new Error('Moraine 服务尚未就绪或操作无效');
+            break;
           case '/api/magpie':
             if (auth) throw new Error('Magpie 配置请在工作台设置页操作');
             if (body.action === 'models') result = await app.magpie.models(body);

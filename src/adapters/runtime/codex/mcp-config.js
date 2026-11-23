@@ -18,6 +18,7 @@ function resolveCodexProjectToolMcpServerConfig({ cyberbossHome = "" } = {}) {
 }
 
 function buildCodexMcpConfigArgs(mcpServerConfig) {
+  if (Array.isArray(mcpServerConfig)) return mcpServerConfig.flatMap(buildCodexMcpConfigArgs);
   if (!mcpServerConfig || typeof mcpServerConfig !== "object") {
     return [];
   }

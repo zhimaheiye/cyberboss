@@ -16,7 +16,7 @@
 
 ## 实际执行
 
-Magpie 使用兼容的 Chat Completions function tools 回合，通过现有 `DesktopTools` 操作工作台。支持统一检索、进展读取与报告、来源核验、浏览器桥接、维护、技能、笔记、观察、完成时间线与 OpenTodo 工具。浏览器操作继续使用同一占用机制；完成判断继续保留 Agent 来源。
+Magpie 使用兼容的 Chat Completions function tools 回合执行已有流程。它收到任务材料、进展和技能，可使用进展读取与报告、来源核验、浏览器维护、观察、完成时间线、工具箱与 OpenTodo。Moraine、全局检索、Markdown 记忆工具及个人偏好注入仅供主 Agent 使用。浏览器操作继续使用同一占用机制，完成判断保留 Agent 来源。
 
 Magpie 不继承 Codex 配置的所有 MCP，也没有通用 shell／任意文件读写工具。它可返回 handoff 说明能力缺口，交由 Codex 继续。浏览器技能文档从本机已安装的 kimi-webbridge 读取；缺少该文档时浏览器步骤交回主 Agent。工具箱仅供读取，进展工具仅开放 read/report，不允许 API 执行器改派任务或管理模型配置。
 

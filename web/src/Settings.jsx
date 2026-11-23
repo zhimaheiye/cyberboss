@@ -27,6 +27,17 @@ export default function Settings() {
     </section>
     <section className="panel"><h2>账户</h2><p>使用本机 Codex 的官方 ChatGPT 订阅登录。</p><Button onClick={async()=>{const result=await api('login',{});const url=new URL(result.authUrl);if(url.protocol!=='https:')throw new Error('登录地址异常');setAuthUrl(url.href);}}>打开官方登录</Button>{authUrl&&<a className="login-link" href={authUrl} target="_blank" rel="noreferrer">继续登录 <ExternalLink size={15}/></a>}</section>
     <RetrievalSettings/>
+    {state.moraine && <section className="panel"><div className="section-heading"><h2>Moraine 长期记忆</h2>
+      <Badge>{{ ready:'运行中', starting:'正在启动', missing:'待安装', offline:'离线' }[state.moraine.status]}</Badge></div>
+      <p>Codex 在聊天和后台任务中召回相关记忆。你可以在记忆库中查看来源、修订内容和审阅候选。</p>
+      {state.moraine.error && <p className="alert error">{state.moraine.error}</p>}
+      {state.moraine.status === 'ready' ? <div className="actions">
+        <a className="secondary" href={state.moraine.url} target="_blank" rel="noreferrer">打开记忆库 <ExternalLink size={15}/></a>
+        <Button onClick={async()=>{const {token}=await api('moraine',{action:'access'});await navigator.clipboard.writeText(token);toast('已复制，可粘贴到记忆库登录框');}}>复制访问令牌</Button>
+      </div> : state.moraine.status === 'missing' ? <p className="hint">在项目目录运行 <code>npm run moraine:install</code> 后重新启动工作台。</p>
+      : <Button disabled={state.moraine.status === 'starting'} onClick={async()=>{await api('moraine',{action:'start'});await refresh();}}>启动记忆库</Button>}
+      <small>{state.moraine.dir}</small>
+    </section>}
     <MagpieSettings/>
     <RetentionSettings/>
     <PromptPreferences/>

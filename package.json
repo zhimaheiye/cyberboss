@@ -16,6 +16,7 @@
     "start": "node ./bin/cyberboss.js start",
     "desktop": "node ./bin/cyberboss.js desktop --open",
     "desktop:install": "node ./scripts/install-desktop.js",
+    "moraine:install": "node ./scripts/install-moraine.js",
     "start:checkin": "node ./bin/cyberboss.js start --checkin",
     "login": "node ./bin/cyberboss.js login",
     "accounts": "node ./bin/cyberboss.js accounts",

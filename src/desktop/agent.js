@@ -7,18 +7,22 @@ const { recordEvent, finishProgress } = require("./run-progress");
 class DesktopAgent {
   constructor({ config, store, toolNames, changed, app, lane = 'chat' }) {
     this.threadMaintenance = app?.threadMaintenance;
+    this.moraine = app?.moraine;
     this.lane = lane;
     this.config = config; this.store = store; this.changed = changed;
     this.active = null; this.approvals = []; this.models = []; this.toolNames = toolNames;
   }
   client() {
     if (this.rpc) return this.rpc;
+    const memoryServer = this.moraine?.mcpConfig();
+    this.rpcHasMoraine = Boolean(memoryServer);
     this.rpc = new CodexRpcClient({
       codexCommand: this.config.codexCommand, extraWritableRoots: [this.store.dir],
       env: { ...process.env, CYBERBOSS_DESKTOP_DIR: this.store.dir, CYBERBOSS_AGENT_LANE: this.lane },
       // Own app-server, never attach to an unrelated process on a shared port.
-      mcpServerConfig: { name: "cyberboss_desktop", command: process.execPath,
+      mcpServerConfig: [{ name: "cyberboss_desktop", command: process.execPath,
         args: [path.resolve(__dirname, "tool-bridge.js"), this.store.dir, this.lane], toolNames: this.toolNames, toolTimeoutSeconds: 600 },
+        memoryServer].filter(Boolean),
     });
     const client = this.rpc;
     this.rpc.onMessage(message => { if (client === this.rpc) this.onMessage(message); });
@@ -27,6 +31,12 @@ class DesktopAgent {
   async initialize() {
     if (this.initializing) return this.initializing;
     this.initializing = (async () => {
+      await this.moraine?.startup;
+      // A service started from Settings joins both lanes on their next turn.
+      if (this.rpc && !this.active?.threadId && this.rpcHasMoraine !== (this.moraine?.status === 'ready')) {
+        const old = this.rpc; this.rpc = null; await old.close();
+      }
+      if (this.active?.run?.cancelRequested) throw new Error('本次任务已取消');
       const rpc = this.client();
       await rpc.connect(); await rpc.initialize();
       const account = (await rpc.sendRequest("account/read", { refreshToken: false })).result?.account;
@@ -96,11 +106,22 @@ class DesktopAgent {
       active.threadId = threadId;
       if (run) { run.threadId = threadId; run.progress = { phase: "model", lastEventAt: new Date().toISOString() }; }
       const instructions = fs.readFileSync(path.resolve(__dirname, "../../templates/desktop-instructions.md"), "utf8");
+      const job = run?.jobId && this.store.data.jobs.find(j => j.id === run.jobId);
+      const history = this.store.data.messages;
+      const currentIndex = history.findIndex(m => m.id === run?.queueId);
+      const recent = background ? [] : history.slice(0, currentIndex < 0 ? history.length : currentIndex)
+        .filter(m => m.kind === 'chat' && m.text).slice(-2);
+      // Recall the task itself, without sending serialized job state or a Magpie handoff.
+      const query = job ? [job.title, job.instructions].filter(Boolean).join('\n') : text;
+      const memoryClues = await this.moraine?.prepare(query, recent);
+      if (this.active !== active || run?.cancelRequested) throw new Error("本次任务已取消");
       const context = {
         now: new Date().toISOString(), timezone: "Asia/Shanghai", mode: background ? "background" : "chat",
         browserMaintenance: this.store.data.maintenance?.policy,
         currentRun: run ? { id: run.id, jobId: run.jobId, kind: this.store.data.jobs.find(j => j.id === run.jobId)?.kind, reusableSkillVersion: run.skillVersion } : null,
         lane: this.lane,
+        moraineAvailable: this.rpcHasMoraine && this.moraine?.status === 'ready',
+        ...(memoryClues ? { moraineRecall: memoryClues } : {}),
         magpieAvailable: this.store.data.magpieEnabled === true,
         personalPreferences: this.store.data.promptPreferences?.versions?.at(-1)?.text || '',
         workProgress: run?.jobId ? this.store.data.workStates?.[run.jobId] || null : null,

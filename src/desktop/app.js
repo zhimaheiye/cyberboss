@@ -8,6 +8,7 @@ const { observationViews } = require('./observations');
 const { DesktopTools } = require("./tools");
 const { AgentPool } = require("./agent-pool");
 const { Magpie } = require('./magpie');
+const { Moraine } = require('./moraine');
 const { WorkState } = require('./work-state');
 const { PromptPreferences } = require('./prompt-preferences');
 const { saveChatImages, removeChatImages, resolveChatAttachments } = require("./chat-images");
@@ -46,6 +47,7 @@ class DesktopApp {
     this.retention = new Retention(this);
     this.threadMaintenance = new ThreadMaintenance(this);
     this.magpie = new Magpie(this.store, changed);
+    this.moraine = new Moraine(changed);
     this.toolbox.resolve = ref => this.retrieval.sources.read(ref);
     this.tools = new DesktopTools({ store: this.store, jobs: this.jobs, todo: this.todo, taskHistory: this.taskHistory, maintenance: this.maintenance,
       browser: this.browser, skills: this.skills, toolbox: this.toolbox, retrieval: this.retrieval, retention: this.retention, work: this.work, magpie: this.magpie });
@@ -54,6 +56,7 @@ class DesktopApp {
     this.lanes = new Set(); this.stopped = false; this.taskRevision = 0;
   }
   async start() {
+    this.moraine.start();
     await this.notifications.ready;
     try { await this.todo.start(); await this.tools.refresh(); }
     catch (error) { this.todo.error = error.message; }
@@ -75,7 +78,7 @@ class DesktopApp {
       pushPublicKey: d.vapid?.publicKey, nextCheckinAt: d.nextCheckinAt, quiet: this.notifications.isQuiet(),
       pending: this.queue.peekForAccount("desktop").length, taskRevision: this.taskRevision, taskHistoryRevision: d.taskEvents.length,
       toolboxRevision: this.toolbox.revision, indexing: this.retrieval.progress, retention: this.retention.view(),
-      threadMaintenance: this.threadMaintenance.view() };
+      threadMaintenance: this.threadMaintenance.view(), moraine: this.moraine.view() };
   }
   enqueue(text, { jobId = "", id = crypto.randomUUID(), background = true } = {}) {
     if (background && jobId && (this.agent.hasJob(jobId) || this.queue.peekForAccount("desktop").some(m => JSON.parse(m.text).jobId === jobId))) return;
@@ -316,6 +319,7 @@ class DesktopApp {
   }
   async close() {
     this.stopped = true; clearInterval(this.timer);
+    this.moraine.close();
     this.retrieval.cancel();
     await this.threadMaintenance.close();
     await this.agent.cancel(); this.todo.close();
