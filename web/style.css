@@ -1,4 +1,14 @@
 .work-detail { display:grid; gap:24px; }
+.start-guide { max-width:900px; margin:0 auto; }
+.start-guide .panel { margin:0 0 18px; }
+.start-guide .field + .field { margin-top:12px; }
+.start-choices { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr)); gap:12px; margin:16px 0 24px; }
+.start-choices button { min-height:54px; justify-content:flex-start; padding:14px 18px; text-align:left; }
+.start-step > .actions { margin:14px 0; }
+.start-instruction { font-size:clamp(18px,2.2vw,25px); line-height:1.65; margin:12px 0 20px; overflow-wrap:anywhere; }
+.start-resource { padding:12px 0; border-top:1px solid var(--line); }
+.start-resource .actions,.start-feedback .actions { margin-top:8px; }
+.start-feedback { margin-top:20px; border-top:1px solid var(--line); padding-top:14px; }
 .work-detail > section + section { border-top:1px solid var(--line); padding-top:20px; }
 .work-detail li { margin:8px 0; overflow-wrap:anywhere; }
 .work-detail li small { display:block; }

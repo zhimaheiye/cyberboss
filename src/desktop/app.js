@@ -16,6 +16,7 @@ const { Notifications } = require("./notifications");
 const { Breathing } = require("./breathing");
 const { AnswerBook } = require("./answer-book");
 const { DecisionGuide } = require('./decision-guide');
+const { Procrastination } = require('./procrastination');
 const { Toolbox } = require('./toolbox');
 const { Retrieval } = require('./retrieval');
 const { Retention } = require('./retention');
@@ -40,6 +41,7 @@ class DesktopApp {
     this.breathing = new Breathing(this.store, changed);
     this.answerBook = new AnswerBook(dir);
     this.decisionGuide = new DecisionGuide(dir);
+    this.procrastination = new Procrastination(this);
     this.toolbox = new Toolbox(this.store);
     this.retrieval = new Retrieval(this, changed);
     this.work = new WorkState(this);

@@ -3,6 +3,7 @@ import { Search, Link2, Plus } from 'lucide-react';
 import { useWorkbench, tool, Button, Dialog, Field, Form, Empty, Badge, fmt } from './shared';
 import { LinkText } from './LocalLinks';
 export const sourceNames = { task: '待办', tool: '工具', job: '托管事项', event: '时间线事件', chat: '对话与提醒', note: '笔记',
+  'start-guide':'拖延速查',
   decision: '决策分支', reference: '参考笔记', run: '执行摘要', skill: '任务技能', 'task-event': '任务状态记录', answer: '答案句库', favorite: '答案收藏', breathing: '呼吸记录' };
 
 export function SourceViewer({ sourceRef, close, onNavigate, standalone = false }) {

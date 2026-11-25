@@ -23,7 +23,7 @@ export function TaskEditor({ task, close }) {
     }}>确认移入</Button></Dialog>}
     <Connections sourceRef={`task:${task.id}`} title={titleOf(task)} onChat={close}/><h3>完成与更正记录</h3><TaskHistory taskId={task.id}/></Dialog>;
 }
-export default function Tasks() {
+export default function Tasks({ openGuide }) {
   const { tasks, hiddenTaskCount, taskError, taskLoading, includeCompleted, setIncludeCompleted, refreshTasks, refresh, go, ask, toast } = useWorkbench();
   const [query, setQuery] = useState(''), [editing,setEditing] = useState(null), [view,setView] = useState('board'), [createKey,setCreateKey]=useState(0);
   const [reviewAI, setReviewAI] = useState(false), [historyTask, setHistoryTask] = useState(null);
@@ -49,7 +49,7 @@ export default function Tasks() {
       {descriptionOf(task) && <p className="line-clamp"><LinkText text={descriptionOf(task)}/></p>}
       {task.completed && <div className="task-completion"><Badge>{completionAuthor(task.completionRecord)}</Badge><small title={task.completed_at}>{fmt(task.completed_at)}</small>
         {task.completionRecord?.actor !== 'user' && <Button onClick={async()=>{await api('tasks/confirm',{taskId:task.id,eventId:task.completionRecord?.id||null,completedAt:task.completed_at});await refresh();await refreshTasks();toast('已记录你的确认');}}>我确认已完成</Button>}</div>}
-      <div className="task-card-footer"><small><CalendarDays size={13}/>{task.due?.date || '未安排日期'} {task.due?.time || ''}{task.recurrence?' · 循环':''}</small><Button className="icon-button" title="完成与更正记录" aria-label="完成与更正记录" onClick={()=>setHistoryTask(task)}><History size={15}/></Button><Button className="icon-button" title="聊聊这件事" aria-label="聊聊这件事" onClick={()=>ask(`关于待办「${titleOf(task)}」（任务 ID：${task.id}）：`)}><MessageSquare size={15}/></Button></div>
+      <div className="task-card-footer">{!task.completed&&<Button className="text-button" onClick={()=>openGuide(task)}>卡住了</Button>}<small><CalendarDays size={13}/>{task.due?.date || '未安排日期'} {task.due?.time || ''}{task.recurrence?' · 循环':''}</small><Button className="icon-button" title="完成与更正记录" aria-label="完成与更正记录" onClick={()=>setHistoryTask(task)}><History size={15}/></Button><Button className="icon-button" title="聊聊这件事" aria-label="聊聊这件事" onClick={()=>ask(`关于待办「${titleOf(task)}」（任务 ID：${task.id}）：`)}><MessageSquare size={15}/></Button></div>
     </article>)}{!items.length&&<div className="column-empty">暂时没有事项</div>}</section>)}</div>}
     {editing&&<TaskEditor task={editing} close={()=>setEditing(null)}/>}{historyTask&&<Dialog title={`完成与更正 · ${titleOf(historyTask)}`} onClose={()=>setHistoryTask(null)} wide><TaskHistory taskId={historyTask.id}/></Dialog>}</>;
 }

@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { observationKind } = require('./observations');
-const SOURCES = ['task', 'tool', 'job', 'event', 'chat', 'note', 'decision', 'reference', 'run', 'skill', 'task-event', 'answer', 'favorite', 'breathing'];
+const SOURCES = ['task', 'tool', 'job', 'event', 'chat', 'note', 'decision', 'reference', 'run', 'skill', 'task-event', 'answer', 'favorite', 'breathing', 'start-guide'];
 const hash = text => crypto.createHash('sha256').update(text).digest('hex');
 const encode = id => encodeURIComponent(String(id));
 function document(source, id, title, text, date, page, archived = false) {
@@ -63,6 +63,17 @@ class SearchSources {
         if (source === 'decision') for (const s of a.decisionGuide.read().scenarios) push(source, s.id, s.title,
           [s.description, ...s.nodes.map(n => [n.id, n.text, n.detail, ...(n.options || []).map(o => `${o.label} → ${o.next}`)].filter(Boolean).join('\n'))].join('\n\n'), null, 'decisions');
         if (source === 'reference') for (const r of a.decisionGuide.references()) push(source, r.name, r.title, a.decisionGuide.reference(r.name).text, null, 'decisions');
+        if (source === 'start-guide') {
+          const {reasons, stats} = a.procrastination.view();
+          for (const reason of reasons) {
+            const methods = reason.strategies.map(s => {
+              const counts = stats[reason.id + '/' + s.id];
+              const feedback = counts ? '反馈：开始了 ' + counts.started + ' 次，仍然卡住 ' + counts.stuck + ' 次，改期或转交 ' + counts.deferred + ' 次' : '';
+              return [s.label + (s.enabled ? '' : '（停用）'), ...s.steps, feedback].filter(Boolean).join('\n');
+            });
+            push(source, reason.id, '拖延速查 · ' + reason.title, [reason.question,...methods,...reason.pins].join('\n\n'), null, 'start-guide', !reason.enabled);
+          }
+        }
         if (source === 'run') for (const r of d.runs) push(source, r.id, d.jobs.find(j => j.id === r.jobId)?.title || (r.background ? '自然唤醒记录' : '对话执行记录'),
           [r.status, r.action, r.note, r.error, r.learningOutcome].filter(Boolean).join('\n'), r.createdAt, 'jobs');
         if (source === 'skill') for (const id of Object.keys(d.learnedSkills || {})) {

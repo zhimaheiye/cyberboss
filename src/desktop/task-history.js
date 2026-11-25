@@ -41,8 +41,9 @@ class TaskHistory {
       if (!trash) {
         if (typeof patch?.title !== 'string' || !patch.title.trim() || patch.title.length > 300
           || typeof patch.description !== 'string' || patch.description.length > 20000) throw new Error('请填写标题，说明最多 2 万字');
-        changes = { title:patch.title.trim(), description:patch.description, due:patch.due };
-        if (changes.due !== null && (!changes.due || !/^\d{4}-\d{2}-\d{2}$/.test(changes.due.date))) throw new Error('日期无效');
+        changes = { title:patch.title.trim(), description:patch.description };
+        if (Object.hasOwn(patch, 'due')) changes.due = patch.due;
+        if (changes.due != null && (!changes.due || !/^\d{4}-\d{2}-\d{2}$/.test(changes.due.date))) throw new Error('日期无效');
         if (changes.due) changes.due = { date:changes.due.date, ...(changes.due.time ? { time:changes.due.time, tz:'Asia/Shanghai' } : {}) };
       }
       const action = trash ? 'trashed' : 'edited';
