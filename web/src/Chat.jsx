@@ -3,6 +3,7 @@ import { AssistantRuntimeProvider, useExternalStoreRuntime, useAuiState, ThreadP
 import { MarkdownTextPrimitive } from '@assistant-ui/react-markdown';
 import remarkGfm from 'remark-gfm';
 import RunProgress from './RunProgress';
+import HandledToday from './HandledToday';
 import { safeHref, WorkspaceLink, remarkWorkspaceLinks } from './LocalLinks';
 import { ArrowUp, ArrowDown, Paperclip, Square, Copy, X, Sparkles, Bell, LoaderCircle } from 'lucide-react';
 import { api, Button, Form, Field, fmt, labels, useWorkbench, Empty } from './shared';
@@ -26,7 +27,8 @@ function convertMessage(message) {
     content: [{ type: 'text', text: message.text || '' }], createdAt: new Date(message.createdAt),
     ...(message.role !== 'user' ? { status: message.streaming ? { type: 'running' } : { type: 'complete', reason: 'stop' } } : {}),
     attachments: message.role === 'user' ? (message.images || []).map(image => ({ id: image.id, name: image.name, type: 'image', status: { type: 'complete' }, content: [{ type: 'image', image: `/api/chat-image?id=${encodeURIComponent(image.id)}` }] })) : [],
-    metadata: { custom: { kind: message.kind, delivery: message.delivery, steps: message.steps, streaming: message.streaming } },
+    metadata: { custom: { kind: message.kind, reminderJobId: !message.jobException && !message.verificationException && ['proactive','reminder'].includes(message.kind) ? message.jobId : null,
+      delivery: message.delivery, steps: message.steps, streaming: message.streaming } },
   };
 }
 function ImageAttachment({ removable = false }) {
@@ -51,6 +53,7 @@ function Message() {
       </div>
       {meta.steps?.length > 0 && <details className="steps"><summary>查看执行过程 · {meta.steps.length} 步</summary>{meta.steps.map((step,i) => <div key={i}><span>{step.name}</span><small>{step.status}</small></div>)}</details>}
       {meta.delivery && <small className="delivery">{meta.delivery}</small>}
+      {meta.reminderJobId && <HandledToday jobId={meta.reminderJobId} messageDate={message.createdAt}/>}
       {!meta.streaming && <ActionBarPrimitive.Root className="message-actions"><ActionBarPrimitive.Copy className="icon-button" title="复制消息" aria-label="复制消息"><Copy size={14}/></ActionBarPrimitive.Copy></ActionBarPrimitive.Root>}
     </div>
   </MessagePrimitive.Root>;

@@ -78,11 +78,28 @@ class JobService {
     this.store.save();
     return job;
   }
-  acknowledge({ id, value, until, note }, actor = 'agent') {
-    note = String(note || (actor === 'user' ? '用户确认已处理' : 'Agent 判定本次已处理'));
+  acknowledge({ id, value, until, note, scope }, actor = 'agent') {
     const job = this.list().find(j => j.id === id);
     if (!job) throw new Error("任务不存在");
-    if (value) {
+    const defaultNote = actor === 'user' ? '用户确认已处理' : 'Agent 判定本次已处理';
+    note = String(note || (scope === 'today' ? '今天已做，今天不再提醒' : defaultNote));
+    if (scope === 'today') {
+      if (actor !== 'user' || job.status !== 'active' || !(job.schedule.type === 'recurring' || job.kind === 'watch') || value || until) {
+        throw new Error('今天已做适用于启用中的周期事项或监控');
+      }
+      const beijingOffset = 8 * 60 * 60 * 1000;
+      const beijingClock = new Date(Date.now() + beijingOffset);
+      const midnight = beijingClock.setUTCHours(24, 0, 0, 0) - beijingOffset;
+      const endOfToday = new Date(midnight).toISOString();
+      if (job.handledTodayUntil === endOfToday && Date.parse(job.suppressUntil) >= midnight) return job;
+      until = Date.parse(job.suppressUntil) > midnight ? job.suppressUntil : endOfToday;
+      if (job.schedule.type === 'recurring' && Date.parse(job.nextRunAt) < Date.parse(until)) {
+        // Include an occurrence scheduled exactly at the first unsuppressed midnight.
+        job.nextRunAt = nextRun(job, new Date(Date.parse(until) - 1));
+      }
+      job.handledTodayUntil = endOfToday;
+      job.suppressUntil = until;
+    } else if (value) {
       if (!job.acknowledgedValues.some(v => v.value === value)) job.acknowledgedValues.push({ value, note, actor, at: new Date().toISOString() });
     } else if (until) {
       if (!Number.isFinite(Date.parse(until)) || Date.parse(until) <= Date.now()) throw new Error("本期完成需要未来的下一周期开始时间");
@@ -92,6 +109,7 @@ class JobService {
     } else job.status = "done";
     job.version++;
     for (const message of this.store.data.messages.filter(m => m.jobId === id && m.unread)) {
+      if (scope === 'today' && (message.jobException || message.verificationException)) continue;
       message.unread = false; message.resolvedAt = new Date().toISOString(); message.pushStatus = "cancelled";
     }
     this.store.add("runs", { jobId: id, status: "acknowledged", actor, note, value, until });
