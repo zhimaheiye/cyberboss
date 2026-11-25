@@ -90,6 +90,7 @@ async function startDesktop(config) {
           case '/api/procrastination':
             if (auth) throw new Error('请从速查表选择操作');
             if (body.action === 'save') result = app.procrastination.save(body);
+            else if (['prepareFirstStep','finishFirstStep'].includes(body.action)) result = app.procrastination.updateFirstStep(body);
             else if (body.action === 'feedback') result = app.procrastination.feedback(body);
             else if (body.action === 'resources') result = await app.procrastination.resources(body);
             else if (body.action === 'plan') {

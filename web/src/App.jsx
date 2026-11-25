@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Compass } from 'lucide-react';
 import Procrastination from './Procrastination';
+import FirstStep from './FirstStep';
 import { createRoot } from 'react-dom/client';
 import { LayoutDashboard, CheckSquare, Workflow, MessagesSquare, BookOpen, History, Settings2, Bell, ArrowUpRight, Menu, X, Sparkles, CircleAlert, Wind, GitBranch, Wrench, Search } from 'lucide-react';
 import Chat from './Chat';
@@ -97,7 +98,7 @@ function App() {
     void refresh();const events=new EventSource('/api/events');events.onmessage=()=>void refresh();events.onerror=()=>setConnected(false);
     const onVisible=()=>{if(!document.hidden)void refresh();};document.addEventListener('visibilitychange',onVisible);
     void setupNotifications().then(()=>enablePush()).catch(error=>setNotificationStatus(`提醒未就绪：${error.message}`));
-    const gesture=e=>{if(!e.isTrusted||(e.type==='keydown'&&e.key!=='Enter')||snapshot.current?.breathing?.active||e.target.closest?.('.breathing-entry, .breathing-dialog'))return;if(window.Notification?.permission==='default')void enablePush(true).catch(error=>toast(error.message,true));document.removeEventListener('click',gesture);document.removeEventListener('keydown',gesture);};
+    const gesture=e=>{if(!e.isTrusted||(e.type==='keydown'&&e.key!=='Enter')||snapshot.current?.breathing?.active||e.target.closest?.('.breathing-entry, .breathing-dialog, .first-step'))return;if(window.Notification?.permission==='default')void enablePush(true).catch(error=>toast(error.message,true));document.removeEventListener('click',gesture);document.removeEventListener('keydown',gesture);};
     document.addEventListener('click',gesture);document.addEventListener('keydown',gesture);
     return()=>{events.close();document.removeEventListener('visibilitychange',onVisible);document.removeEventListener('click',gesture);document.removeEventListener('keydown',gesture);clearTimeout(timer.current);};
   },[refresh,enablePush,toast]);
@@ -149,7 +150,7 @@ function App() {
       {!breathing && !state.breathing?.active && state.breathing?.reminderCount > 0 && <div className="breathing-summary">
         <Button onClick={showBreathingReminders}><Bell size={16}/>练习期间有 {state.breathing.reminderCount} 条提醒<ArrowUpRight size={15}/></Button>
       </div>}
-      {state.agent.approvals.length>0&&page!=='chat'&&<div className="global-alert" role="status"><CircleAlert size={18}/><span>有 {state.agent.approvals.length} 项请求等待你处理</span><Button onClick={()=>go('chat')}>查看并处理</Button></div>}<Chat active={page==='chat'}/><div className="page-content" hidden={page==='chat'}><Procrastination key={guideEntry?.key||'general'} entry={guideEntry} active={page==='start-guide'} startBreathing={startBreathing}/><DecisionGuide active={page==='decisions'}/>{page==='overview'&&<Overview openGuide={openGuide}/>}{page==='tasks'&&<Tasks openGuide={openGuide}/>}{page==='tools'&&<Toolbox/>}{page==='jobs'&&<Jobs/>}{page==='memory'&&<Memory/>}{page==='timeline'&&<Timeline/>}{page==='answer-book'&&<AnswerBook/>}{page==='settings'&&<Settings/>}</div>
+      {state.agent.approvals.length>0&&page!=='chat'&&<div className="global-alert" role="status"><CircleAlert size={18}/><span>有 {state.agent.approvals.length} 项请求等待你处理</span><Button onClick={()=>go('chat')}>查看并处理</Button></div>}<Chat active={page==='chat'}/><div className="page-content" hidden={page==='chat'}><Procrastination key={guideEntry?.key||'general'} entry={guideEntry} active={page==='start-guide'} startBreathing={startBreathing}/><DecisionGuide active={page==='decisions'}/>{page==='overview'&&<FirstStep key={state.firstStep?.id}><Overview openGuide={openGuide}/></FirstStep>}{page==='tasks'&&<Tasks openGuide={openGuide}/>}{page==='tools'&&<Toolbox/>}{page==='jobs'&&<Jobs/>}{page==='memory'&&<Memory/>}{page==='timeline'&&<Timeline/>}{page==='answer-book'&&<AnswerBook/>}{page==='settings'&&<Settings/>}</div>
     </main></div>{notice&&<div className={`toast ${notice.error?'error':''}`} role="status"><span>{notice.text}</span><button className="icon-button" aria-label="关闭提示" onClick={()=>setNotice(null)}><X size={16}/></button></div>}
     {historyMessage&&<Dialog title="历史消息" onClose={()=>setHistoryMessage(null)} wide><small>{fmt(historyMessage.createdAt)}</small><p className="preserve-lines">{historyMessage.text}</p><div className="attachments">{(historyMessage.images||[]).map(image=><a key={image.id} href={`/api/chat-image?id=${encodeURIComponent(image.id)}`} target="_blank" rel="noreferrer"><img src={`/api/chat-image?id=${encodeURIComponent(image.id)}`} alt={image.name}/></a>)}</div><ReminderActions message={state.messages.find(m=>m.id===historyMessage.id)||historyMessage} onNavigate={()=>setHistoryMessage(null)}/></Dialog>}
     {editingJob&&<JobEditor job={editingJob} close={()=>editJob(null)}/>}

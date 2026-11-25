@@ -119,7 +119,7 @@ export default function Procrastination({active,entry,startBreathing}) {
         <Button onClick={()=>setCustom(true)}>改成我的做法</Button>
         {methods.length>1&&<Button onClick={()=>chooseMethod('')}>换个方法</Button>}
       </div><FiveMinutes/>
-      <StartActions key={method.id+level+step} task={task} subject={subject} step={step} reason={reason} resources={resources} soon={soon} startBreathing={startBreathing}/>
+      <StartActions key={method.id+level+step} task={task} subject={subject} step={step} hint={override?'':method.steps[level+1]} reason={reason} resources={resources} soon={soon} startBreathing={startBreathing}/>
       <div className="start-feedback"><small>{recorded?'这次反馈已记录':'这次怎么样？'}</small><div className="actions">
         <Button disabled={recorded} onClick={()=>feedback('started')}>开始动了</Button><Button disabled={recorded} onClick={()=>feedback('stuck')}>还是卡住</Button>
         <Button disabled={recorded} onClick={()=>feedback('deferred')}>改期或转交了</Button></div></div>

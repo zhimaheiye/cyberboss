@@ -24,6 +24,28 @@ class Procrastination {
   constructor(app) {
     this.app = app;
     this.dir = path.join(app.store.dir, 'procrastination');
+    this.firstStepFile = path.join(this.dir, 'first-step.json');
+    this.firstStep = read(this.firstStepFile, null);
+  }
+  updateFirstStep(input) {
+    const current = this.firstStep;
+    if (input.expectedId !== (current?.id ?? null)) throw new Error('首页的第一步已更新，请重新打开后再试');
+    let next;
+    if (input.action === 'finishFirstStep') {
+      if (!current) throw new Error('没有可完成的第一步');
+      if (current.finishedAt) return current;
+      next = { ...current, finishedAt:new Date().toISOString() };
+    } else {
+      const tomorrow = new Intl.DateTimeFormat('en-CA', {
+        timeZone:'Asia/Shanghai', year:'numeric', month:'2-digit', day:'2-digit',
+      }).format(Date.now() + 86400000);
+      next = { id:require('node:crypto').randomUUID(), date:tomorrow, subject:string(input.subject, 500, true),
+        step:string(input.step, 600), hint:string(input.hint, 600, true) };
+    }
+    writeJson(this.firstStepFile, next);
+    this.firstStep = next;
+    this.app.changed();
+    return next;
   }
   book() { return read(path.join(this.dir, 'playbook.json'), { revision:0, reasons:starters }); }
   history() { return read(path.join(this.dir, 'history.json'), []); }

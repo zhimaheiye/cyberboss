@@ -30,7 +30,7 @@ function DeferTasks({tasks,taskId,close}) {
   </Form></Dialog>;
 }
 
-export default function StartActions({task,subject,step,reason,resources,soon,startBreathing}) {
+export default function StartActions({task,subject,step,hint,reason,resources,soon,startBreathing}) {
   const {state,go,refresh,refreshTasks,editJob,toast}=useWorkbench();
   const [dialog,setDialog]=useState(''),[provider,setProvider]=useState('codex'),[plan,setPlan]=useState('');
   const [time,setTime]=useState('5 分钟'),[energy,setEnergy]=useState('一般');
@@ -65,11 +65,20 @@ export default function StartActions({task,subject,step,reason,resources,soon,st
     {task?<Button onClick={appendStep}>写回待办第一步</Button>:<Button onClick={()=>setDialog('task')}>加入待办</Button>}
     <Button onClick={()=>setDialog('plan')}>请 AI 帮我安排</Button>
   </div><details><summary>其他做法</summary><div className="actions">
+    <Button onClick={()=>setDialog('morning')}>留作明天的第一步</Button>
     <Button onClick={()=>editJob({title:title.slice(0,300),kind:'operation',status:'draft',instructions:'请帮我准备：'+step+'\n事情：'+title})}>交给 Agent 准备</Button>
     <Button className="breathing-entry secondary" onClick={startBreathing}>缓一缓</Button>
     <Button onClick={()=>setDialog('note')}>写一份草稿</Button>
     {(soon.length>0||task)&&<Button onClick={()=>setDialog('defer')}>调整待办日期</Button>}
   </div></details>
+  {dialog==='morning'&&<Dialog title="明天打开首页时先看这一步" onClose={close}>
+    <p className="preserve-lines">{step}</p>
+    {state.firstStep&&!state.firstStep.finishedAt&&<p>将替换之前留的动作「{state.firstStep.step}」。</p>}
+    <Button className="primary" onClick={async()=>{
+      await api('procrastination',{action:'prepareFirstStep',expectedId:state.firstStep?.id??null,subject:subject.slice(0,500),step,hint:hint||''});
+      await refresh();close();toast('已留在明天的首页');
+    }}>留给明天</Button>
+  </Dialog>}
   {dialog==='plan'&&<Dialog title="结合手边资源安排" onClose={close}><div className="field-pair">
     <Field label="可用时间"><select value={time} onChange={e=>setTime(e.target.value)}>{['5 分钟','10 分钟','半小时以上'].map(t=><option key={t}>{t}</option>)}</select></Field>
     <Field label="目前精力"><select value={energy} onChange={e=>setEnergy(e.target.value)}>{['很低','一般','还不错'].map(t=><option key={t}>{t}</option>)}</select></Field></div>
