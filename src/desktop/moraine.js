@@ -73,7 +73,7 @@ class Moraine {
     this.changed();
   }
   async prepare(message, recent) {
-    if (this.status !== 'ready' || !message?.trim()) return '';
+    if (this.status !== 'ready' || !message?.trim()) return { status:'offline', text:'', error:this.error };
     try {
       const response = await fetch(`${url}/api/host/turn/prepare`, {
         method: 'POST', redirect: 'error', signal: AbortSignal.timeout(2500),
@@ -84,8 +84,12 @@ class Moraine {
       const { prompt_context } = await response.json();
       if (typeof prompt_context !== 'string') throw new Error('缺少召回正文');
       this.recallError = '';
-      return prompt_context.slice(0, 8000);
-    } catch (error) { this.recallError = `本轮自动召回失败：${error.message}`; return ''; }
+      return { status:'ready', text:prompt_context.slice(0, 8000), error:'' };
+    } catch (error) {
+      const message = `本轮自动召回失败：${error.message}`;
+      this.recallError = message;
+      return { status:'failed', text:'', error:message };
+    }
   }
   close() {
     this.stopped = true;

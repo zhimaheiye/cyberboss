@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { api, Button, Dialog, Form, Field, fmt, useWorkbench } from './shared';
 import RunProgress from './RunProgress';
 import { SearchDialog } from './Search';
+import JobActions from './JobActions';
 export function Decision({ value }) {
   if (!value) return null;
   const names = { silent:'保持静默', notified:'已加入提醒', handoff:'需要接手', suppressed:'提醒暂缓', retry:'等待重新核验', failed:'执行未完成', cancelled:'已停止' };
@@ -18,6 +19,7 @@ export default function WorkDetail({ jobId, close }) {
   useEffect(() => { let disposed = false; api(`work?jobId=${encodeURIComponent(jobId)}`).then(r => { if (!disposed) { setData(r); setError(''); } }).catch(e => { if (!disposed) setError(e.message); }); return () => { disposed = true; }; }, [jobId, revision?.version, revision?.lastRunAt, revision?.pendingEvents, JSON.stringify(revision?.subscriptionErrors)]);
   const progress = data?.progress, latest = state.runs.findLast(r => r.jobId === jobId);
   return <Dialog title={job?.title || '托管事项'} onClose={close} wide>
+    {job && <JobActions job={job} onNavigate={close}/>}
     {error && <div className="alert error">{error}<Button onClick={load}>重新读取</Button></div>}
     {!data ? <p>正在读取进展…</p> : <div className="work-detail">
       <section><h3>当前进展</h3><p className="preserve-lines">{progress.summary || '首次运行后，Agent 会在有实质进展时保存摘要。'}</p>

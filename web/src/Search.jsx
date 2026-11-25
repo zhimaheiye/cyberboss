@@ -5,8 +5,8 @@ import { LinkText } from './LocalLinks';
 export const sourceNames = { task: '待办', tool: '工具', job: '托管事项', event: '时间线事件', chat: '对话与提醒', note: '笔记',
   decision: '决策分支', reference: '参考笔记', run: '执行摘要', skill: '任务技能', 'task-event': '任务状态记录', answer: '答案句库', favorite: '答案收藏', breathing: '呼吸记录' };
 
-export function SourceViewer({ sourceRef, close, onNavigate }) {
-  const { go } = useWorkbench(), [doc, setDoc] = useState(null), [error, setError] = useState('');
+export function SourceViewer({ sourceRef, close, onNavigate, standalone = false }) {
+  const { openSource } = useWorkbench(), [doc, setDoc] = useState(null), [error, setError] = useState('');
   useEffect(() => { let alive = true; setDoc(null); setError(''); tool('cb_recall', { action: 'read', ref: sourceRef }).then(d => { if (alive) setDoc(d); }).catch(e => { if (alive) setError(e.message); }); return () => { alive = false; }; }, [sourceRef]);
   return <Dialog title={doc?.title || '读取原记录'} onClose={close} wide>{!doc && !error && <p role="status">正在读取原文…</p>}{error && <p className="alert error">{error}</p>}{doc && <>
     <div className="section-heading"><Badge>{sourceNames[doc.source]}</Badge><small>{fmt(doc.date)}</small></div>
@@ -15,14 +15,16 @@ export function SourceViewer({ sourceRef, close, onNavigate }) {
       if (next.hash !== doc.hash) throw new Error('原文已更新，请关闭后重新打开');
       setDoc({ ...next, text: doc.text + next.text });
     }}>继续读取</Button>}
-    <div className="actions"><Button onClick={() => { close(); onNavigate?.(); go(doc.page); }}>打开所属页面</Button></div>
+    {!standalone&&<div className="actions"><Button onClick={async () => { close(); onNavigate?.(); await openSource(doc); }}>打开这条记录</Button></div>}
     <Connections sourceRef={doc.ref} title={doc.title} onChat={() => { close(); onNavigate?.(); }}/>
   </>}</Dialog>;
 }
-export function SearchDialog({ close, choose, initialQuery = '', onNavigate }) {
-  const [query, setQuery] = useState(initialQuery), [source, setSource] = useState(''), [archived, setArchived] = useState(false);
-  const [result, setResult] = useState(null), [viewing, setViewing] = useState(null), [error, setError] = useState(''), [busy, setBusy] = useState(false);
-  const [lastQuery, setLastQuery] = useState(null);
+export function SearchDialog({ close, choose, initialQuery = '', onNavigate, savedState, onRemember }) {
+  const {openSource}=useWorkbench();
+  const [query, setQuery] = useState(savedState?.query || initialQuery), [source, setSource] = useState(savedState?.source || ''), [archived, setArchived] = useState(savedState?.archived || false);
+  const [result, setResult] = useState(savedState?.result || null), [viewing, setViewing] = useState(null), [error, setError] = useState(''), [busy, setBusy] = useState(false);
+  const [lastQuery, setLastQuery] = useState(savedState?.lastQuery || null);
+  useEffect(()=>{onRemember?.({query,source,archived,result,lastQuery});},[query,source,archived,result,lastQuery,onRemember]);
   async function search(offset = 0) {
     setBusy(true); setError('');
     const args = offset ? lastQuery : { action: 'search', query, ...(source ? { sources: [source] } : {}), includeArchived: archived };
@@ -38,7 +40,7 @@ export function SearchDialog({ close, choose, initialQuery = '', onNavigate }) {
     {error && <p className="alert error">{error}</p>}{result && <><p className="hint">{result.mode === 'hybrid' ? '关键词 + 向量' : '关键词'} · {result.total} 条结果</p>
       {result.warnings.map((warning, i) => <p className="hint" key={i}>{warning}</p>)}<div className="search-results">{result.items.map((item, i) => <article className="panel" key={`${item.ref}:${i}`}>
         <div className="section-heading"><Badge>{sourceNames[item.source]}</Badge><small>{fmt(item.date)}</small></div><h3>{item.title}</h3><p className="source-excerpt">{item.snippet}</p>
-        {item.matchedTerms.length > 0 && <small>匹配：{item.matchedTerms.join('、')}</small>}<div className="actions"><Button onClick={() => setViewing(item.ref)}>查看原文</Button>{choose && <Button onClick={() => choose(item)}><Link2 size={15}/>关联这条</Button>}</div>
+        {item.matchedTerms.length > 0 && <small>匹配：{item.matchedTerms.join('、')}</small>}<div className="actions"><Button onClick={() => setViewing(item.ref)}>查看原文</Button>{choose ? <Button onClick={() => choose(item)}><Link2 size={15}/>关联这条</Button> : <Button onClick={async()=>{close();onNavigate?.();await openSource(item);}}>打开这条记录</Button>}</div>
       </article>)}</div>{!result.items.length && <Empty title="没有找到匹配内容">可以换一种描述，或使用工具的能力、用途和别名搜索。</Empty>}
       {result.nextOffset !== null && <Button disabled={busy} onClick={() => search(result.nextOffset)}>更多结果</Button>}</>}
     {!result && !busy && <p className="hint">搜索现有待办、工具、事件、对话、笔记及其他工作台内容。结果可继续读取原文。</p>}

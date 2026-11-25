@@ -3,6 +3,7 @@
 | 功能 | 状态 | 维护入口 |
 | --- | --- | --- |
 | 本地工作台 | 已有源码与实际使用反馈，部分改进尚未实机验收 | [工作台说明](../本地生活工作台.md)、`src/desktop/`、`web/src/` |
+| 日常操作与页面联动 | 提醒撤销、事项快捷操作、聊天排队转存、搜索定位与笔记管理；待加载验收 | [功能与使用边界](daily-workflows.md) |
 | Agent 自主恢复与循环技能 | 已有源码；最近恢复机制未在本轮重启部署 | [工作台说明](../本地生活工作台.md)、`maintenance.js`、`browser.js`、`learned-skills.js`、`templates/desktop-instructions.md` |
 | 呼吸引导 | 已实现，待实际使用验收 | [呼吸档案](breathing.md) |
 | 答案之书 | 首版已接入，待启动加载与实际使用验收 | [功能、句库来源与导入说明](answer-book.md) |

@@ -27,6 +27,16 @@ function nextRun(job, after = new Date()) {
   return rule.after(after, false)?.toISOString() || null;
 }
 
+function notificationAllowed(job, now = Date.now()) {
+  if (!job.lastNotifiedAt) return true;
+  const mode = job.notificationCadence || (job.minimumGapMinutes === 1440 ? 'daily' : 'interval');
+  if (mode === 'daily') {
+    const day = new Intl.DateTimeFormat('en-CA', { timeZone: job.timezone || 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' });
+    return day.format(new Date(now)) !== day.format(new Date(job.lastNotifiedAt));
+  }
+  return now - Date.parse(job.lastNotifiedAt) >= job.minimumGapMinutes * 60000;
+}
+
 class JobService {
   constructor(store) { this.store = store; }
   list() { return this.store.data.jobs; }
@@ -47,6 +57,7 @@ class JobService {
       activeFrom: input.activeFrom ?? existing?.activeFrom ?? "",
       activeUntil: input.activeUntil ?? existing?.activeUntil ?? "",
       minimumGapMinutes: Number(input.minimumGapMinutes ?? existing?.minimumGapMinutes ?? 1440),
+      notificationCadence: input.notificationCadence ?? existing?.notificationCadence ?? ((input.minimumGapMinutes ?? existing?.minimumGapMinutes ?? 1440) == 1440 ? 'daily' : 'interval'),
       contexts: String(input.contexts ?? existing?.contexts ?? ""),
       blocker: (input.status ?? existing?.status) === 'blocked' ? input.blocker ?? existing?.blocker ?? null : null,
       taskId: String(input.taskId ?? existing?.taskId ?? ""),
@@ -61,6 +72,7 @@ class JobService {
     if (!['codex', 'magpie', 'auto'].includes(job.executor)) throw new Error('执行方式无效');
     if (actor === 'agent' && (job.executor !== (existing?.executor || 'codex') || job.magpieModel !== (existing?.magpieModel || ''))) throw new Error('任务的模型分配由用户在事项编辑中设置，Agent 可以提出建议');
     if (!Number.isFinite(job.minimumGapMinutes) || job.minimumGapMinutes < 0) throw new Error("提醒间隔无效");
+    if (!['daily', 'interval'].includes(job.notificationCadence)) throw new Error("提醒频率无效");
     if (job.suppressUntil && !Number.isFinite(Date.parse(job.suppressUntil))) throw new Error("静默日期无效");
     for (const key of ["activeFrom", "activeUntil"]) if (job[key] && !Number.isFinite(Date.parse(job[key]))) throw new Error("有效窗口日期无效");
     const calculated = nextRun(job);
@@ -93,10 +105,12 @@ class JobService {
       const endOfToday = new Date(midnight).toISOString();
       if (job.handledTodayUntil === endOfToday && Date.parse(job.suppressUntil) >= midnight) return job;
       until = Date.parse(job.suppressUntil) > midnight ? job.suppressUntil : endOfToday;
+      const previousSuppressUntil = job.suppressUntil || '';
       if (job.schedule.type === 'recurring' && Date.parse(job.nextRunAt) < Date.parse(until)) {
         // Include an occurrence scheduled exactly at the first unsuppressed midnight.
         job.nextRunAt = nextRun(job, new Date(Date.parse(until) - 1));
       }
+      job.todayAcknowledgement = { previousSuppressUntil, until };
       job.handledTodayUntil = endOfToday;
       job.suppressUntil = until;
     } else if (value) {
@@ -115,6 +129,25 @@ class JobService {
     this.store.add("runs", { jobId: id, status: "acknowledged", actor, note, value, until });
     this.store.data.taskEvents ||= [];
     this.store.add('taskEvents', { action: 'job_acknowledged', jobId: id, title: job.title, actor, evidence: note, value, until });
+    return job;
+  }
+  undoToday({ id, version }) {
+    const job = this.list().find(j => j.id === id);
+    if (!job || job.version !== version) throw new Error('事项已变化，请刷新后再操作');
+    if (!(Date.parse(job.handledTodayUntil) > Date.now())) throw new Error('当天确认已到期');
+    const previous = job.todayAcknowledgement;
+    if (job.suppressUntil === (previous?.until || job.handledTodayUntil)) {
+      const restored = previous?.previousSuppressUntil || '';
+      const after = Math.max(Date.now(), Date.parse(restored) - 1 || 0);
+      const next = job.schedule.type === 'recurring' ? nextRun(job, new Date(after)) : job.nextRunAt;
+      job.suppressUntil = restored;
+      job.nextRunAt = next;
+    }
+    delete job.handledTodayUntil;
+    delete job.todayAcknowledgement;
+    job.version++;
+    this.store.add('taskEvents', { action: 'job_acknowledgement_undone', jobId: id, title: job.title,
+      actor: 'user', evidence: '撤销今天已做，恢复后续提醒', until: job.suppressUntil });
     return job;
   }
   importHub(root) {
@@ -157,4 +190,4 @@ function durationMinutes(value) {
   const match = /^(\d+)\s*(m|h|d)$/.exec(String(value || ""));
   return match ? Number(match[1]) * ({ m: 1, h: 60, d: 1440 }[match[2]]) : 1440;
 }
-module.exports = { JobService, nextRun };
+module.exports = { JobService, nextRun, notificationAllowed };

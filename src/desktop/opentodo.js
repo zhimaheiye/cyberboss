@@ -58,7 +58,7 @@ class OpenTodo {
     const response = await fetch(this.url + route, { method, redirect: "error", signal: AbortSignal.timeout(timeout),
       headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body) });
-    const data = await response.json();
+    const data = response.status === 204 ? {} : await response.json();
     if (!response.ok) throw new Error(`OpenTodo: ${data.error?.message || response.status}`);
     return { data, cookie: response.headers.get("set-cookie")?.split(";")[0] };
   }

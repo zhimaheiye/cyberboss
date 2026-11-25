@@ -99,7 +99,7 @@ class DesktopApp {
     let record;
     try {
       record = this.store.add("messages", {
-        id, role: "user", text, kind: "chat",
+        id, role: "user", text, kind: "chat", topicId: this.store.data.chatTopicId || null,
         ...(attachments.length ? { images: attachments } : {}),
       });
       this.enqueue(text, { background: false, id });
@@ -250,7 +250,7 @@ class DesktopApp {
           } else if (job?.verificationRetry) { delete job.verificationRetry; job.version++; }
           const cooldown = job ? job.minimumGapMinutes : 30;
           const last = job?.lastNotifiedAt || (!job ? this.store.data.lastProactiveAt : null);
-          const allowed = !last || Date.now() - Date.parse(last) >= cooldown * 60000;
+          const allowed = job ? require('./jobs').notificationAllowed(job) : !last || Date.now() - Date.parse(last) >= cooldown * 60000;
           const needsHandoff = job?.status === 'blocked' && job.blocker?.sourceRunId === run.id;
           if (action.action === "send_message" && (allowed || needsHandoff) && (!job || (job.status === "active" || needsHandoff) && withinWindow(job) && !(Date.parse(job.suppressUntil) > Date.now()))) {
             this.notifications.add(action.message, "proactive", { jobId: input.jobId, runId: run.id, ...(needsHandoff ? { jobException: true } : {}) });
@@ -265,7 +265,7 @@ class DesktopApp {
             run.notificationDecision.outcome = 'suppressed';
             run.notificationDecision.suppression = !allowed ? '提醒冷却间隔内' : '任务状态、静默或有效窗口限制';
           }
-        } else this.store.add("messages", { role: "assistant", text: reply, kind: "chat", unread: false });
+        } else this.store.add("messages", { role: "assistant", text: reply, kind: "chat", topicId: this.store.data.chatTopicId || null, unread: false });
         if (job) { job.lastRunAt = run.finishedAt; job.lastError = job.status === 'blocked' ? job.blocker?.evidence || job.lastError : run.status === 'incomplete' ? run.note : ""; }
       } catch (error) {
         if (input.jobId) job = this.jobs.list().find(j => j.id === input.jobId);
@@ -308,14 +308,27 @@ class DesktopApp {
     }
   }
   settings(input) {
-    if (this.agent.active) throw new Error("请等待当前执行结束或先停止，再修改运行设置");
+    input = { ...this.store.data.settings, ...input };
+    if (this.agent.active && String(input.model || '').trim() !== (this.store.data.settings.model || '')) throw new Error("请等待当前执行结束或先停止，再切换模型");
     const minutes = Number(input.checkinMinutes);
     if (!Number.isFinite(minutes) || minutes < 10 || minutes > 1440) throw new Error("唤醒间隔为 10～1440 分钟");
     for (const name of ["quietStart", "quietEnd"]) if (input[name] && !/^([01]\d|2[0-3]):[0-5]\d$/.test(input[name])) throw new Error("免打扰时间无效");
+    const reschedule = !!input.checkinEnabled !== this.store.data.settings.checkinEnabled || minutes !== this.store.data.settings.checkinMinutes;
     Object.assign(this.store.data.settings, { model: String(input.model || "").trim(), checkinEnabled: !!input.checkinEnabled, checkinMinutes: minutes,
       quietStart: input.quietStart || "", quietEnd: input.quietEnd || "" });
-    this.store.data.nextCheckinAt = new Date(Date.now() + minutes * 60000).toISOString();
+    if (reschedule) this.store.data.nextCheckinAt = new Date(Date.now() + minutes * 60000).toISOString();
     this.store.save(); this.changed(); return this.store.data.settings;
+  }
+  newTopic() {
+    if (this.agent.chat.active || this.lanes.has(false) || this.queue.peekForAccount('desktop').some(e => JSON.parse(e.text).background === false)) {
+      throw new Error('请等当前回复和排队消息结束，或先停止回复，再开启新话题');
+    }
+    this.threadMaintenance.discover();
+    delete (this.store.data.sessionThreads ||= {}).chat;
+    this.store.data.chatTopicId = crypto.randomUUID();
+    this.store.add('messages', { role: 'system', kind: 'topic', text: '新话题', topicId: this.store.data.chatTopicId });
+    this.changed();
+    return { topicId: this.store.data.chatTopicId };
   }
   async close() {
     this.stopped = true; clearInterval(this.timer);

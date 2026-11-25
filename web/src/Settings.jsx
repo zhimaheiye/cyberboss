@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { RefreshCw, ExternalLink, ShieldCheck, MonitorCog, Folder } from 'lucide-react';
 import { useWorkbench, api, Button, Form, Field, Badge, fmt, Empty } from './shared';
 import RetrievalSettings from './RetrievalSettings';
@@ -9,15 +9,40 @@ import MagpieSettings from './MagpieSettings';
 export default function Settings() {
   const {state,refresh,toast,notificationStatus,enablePush}=useWorkbench();
   const [model,setModel]=useState(state.settings.model||''),[custom,setCustom]=useState(false),[authUrl,setAuthUrl]=useState('');
+  const [draft,setDraft]=useState(state.settings), previous=useRef(state.settings);
+  useEffect(()=>{
+    const changed=Object.fromEntries(Object.entries(state.settings).filter(([key,value])=>value!==previous.current[key]));
+    if('model' in changed)setModel(changed.model);
+    setDraft(current=>({...current,...changed}));previous.current=state.settings;
+  },[state.settings]);
   const models=state.agent.models||[];const known=!model||models.some(m=>(m.model||m.id)===model);
   const maintenance=state.maintenance, status=maintenance?.status;
+  async function login() {
+    const tab=window.open('about:blank','cyberboss-login');
+    if(tab)tab.opener=null;
+    try {
+      const result=await api('login',{}),url=new URL(result.authUrl);
+      if(url.protocol!=='https:')throw new Error('登录地址异常');
+      setAuthUrl(url.href);if(tab)tab.location=url.href;
+    } catch(error) { tab?.close();throw error; }
+  }
+  async function openMemory() {
+    const tab=window.open('about:blank','cyberboss-moraine');
+    if(tab)tab.opener=null;
+    try {
+      const {token}=await api('moraine',{action:'access'});
+      await navigator.clipboard.writeText(token);
+      if(tab)tab.location=state.moraine.url;
+      toast('访问令牌已复制；如需登录，可直接粘贴');
+    } catch(error) { tab?.close();throw error; }
+  }
   return <div className="settings-layout"><section className="panel"><div className="section-heading"><h2>模型与工作节奏</h2><Badge>本机 Codex</Badge></div><Form submit="保存设置" onSave={async d=>{
-    await api('settings',{model,checkinEnabled:d.get('checkinEnabled')==='on',checkinMinutes:Number(d.get('checkinMinutes')),quietStart:d.get('quietStart'),quietEnd:d.get('quietEnd')});await refresh();toast('设置已保存');
+    await api('settings',{...draft,model,checkinMinutes:Number(draft.checkinMinutes)});await refresh();toast('设置已保存');
   }}><Field label="Codex 模型"><div className="input-action"><select value={custom||!known?'__custom__':model} onChange={e=>{setCustom(e.target.value==='__custom__');if(e.target.value!=='__custom__')setModel(e.target.value);}}><option value="">沿用 Codex 默认模型</option>{models.map(m=><option key={m.model||m.id} value={m.model||m.id}>{m.displayName||m.model||m.id}{m.isDefault?'（默认）':''}</option>)}<option value="__custom__">手动填写模型 ID…</option></select><Button onClick={async()=>{const result=await api('models',{});await refresh();toast(`已拉取 ${result.models.length} 个模型`);}}><RefreshCw size={16}/>拉取模型</Button></div></Field>
     {(custom||!known)&&<Field label="模型 ID"><input value={model} onChange={e=>setModel(e.target.value)} placeholder="填写模型 ID"/></Field>}
-    <label className="switch-row"><span><strong>自然唤醒</strong><small>Agent 定期看看是否有值得跟进的事情</small></span><input name="checkinEnabled" type="checkbox" role="switch" defaultChecked={state.settings.checkinEnabled}/></label>
-    <Field label="唤醒间隔（分钟）" name="checkinMinutes" type="number" min="10" max="1440" defaultValue={state.settings.checkinMinutes} required/>
-    <div className="field-pair"><Field label="免打扰开始" name="quietStart" type="time" defaultValue={state.settings.quietStart}/><Field label="结束" name="quietEnd" type="time" defaultValue={state.settings.quietEnd}/></div><p className="hint">明确设置的到点提醒不受免打扰影响。电脑关机期间不执行，重新启动后合并检查。</p></Form></section>
+    <label className="switch-row"><span><strong>自然唤醒</strong><small>Agent 定期看看是否有值得跟进的事情</small></span><input type="checkbox" role="switch" checked={!!draft.checkinEnabled} onChange={e=>setDraft({...draft,checkinEnabled:e.target.checked})}/></label>
+    <Field label="唤醒间隔（分钟）" type="number" min="10" max="1440" value={draft.checkinMinutes} onChange={e=>setDraft({...draft,checkinMinutes:e.target.value})} required/>
+    <div className="field-pair"><Field label="免打扰开始" type="time" value={draft.quietStart} onChange={e=>setDraft({...draft,quietStart:e.target.value})}/><Field label="结束" type="time" value={draft.quietEnd} onChange={e=>setDraft({...draft,quietEnd:e.target.value})}/></div><p className="hint">明确设置的到点提醒不受免打扰影响。电脑关机期间不执行，重新启动后合并检查。</p></Form></section>
     <section className="panel"><h2>桌面通知</h2><p>默认启用；浏览器首次使用仍需你允许通知。</p><Button onClick={()=>enablePush(true)}>{notificationStatus}</Button><p className="hint">如果被阻止，请在地址栏的网站权限中允许通知。后台推送不可用时，保持页面运行也能接收提醒。</p></section>
     <section className="panel settings-wide"><div className="section-heading"><h2><MonitorCog size={20}/>浏览器技能维护</h2><Badge value={status?.extension_connected?'active':'draft'}>{status?.extension_connected?'扩展已连接':status?.running?'等待扩展连接':'尚未连接或未检查'}</Badge></div>
       <label className="switch-row"><span><strong><ShieldCheck size={16}/>已预先授权自动维护</strong><small>发现 Kimi 更新就升级；Agent 需要浏览器能力时可启动或重启守护进程。</small></span><input type="checkbox" role="switch" checked={!!maintenance?.policy.enabled} disabled={maintenance?.busy} onChange={async e=>{try{await api('maintenance',{action:'set_policy',enabled:e.target.checked});await refresh();}catch(error){toast(error.message,true);}}}/></label>
@@ -25,7 +50,7 @@ export default function Settings() {
       <div className="actions"><Button disabled={maintenance?.busy||state.agent.busy} onClick={async()=>{await api('maintenance',{action:'check'});await refresh();}}>检查并处理更新</Button><Button disabled={maintenance?.busy||!maintenance?.policy.enabled||state.agent.busy} onClick={async()=>{await api('maintenance',{action:'prepare_browser'});await refresh();}}>准备 / 恢复浏览器</Button><Button disabled={maintenance?.busy} onClick={async()=>{await api('maintenance',{action:'diagnose'});await refresh();}}>查看连接诊断</Button><small>版本 {status?.version||'—'} · 上次检查 {fmt(maintenance?.checkedAt)}</small></div>
       <div className="maintenance-records">{maintenance?.records.length?maintenance.records.slice().reverse().map(r=><details key={r.id}><summary><Badge value={r.status}/><span>{r.action==='prepare_browser'?'浏览器准备':r.action==='diagnose'?'连接诊断':'检查更新'}</span><small>{fmt(r.createdAt)}</small></summary><p>{r.error||r.note||'正在处理…'}</p><pre>{r.steps.map(s=>`${s.at?fmt(s.at)+' ':''}${s.command}\n${s.output}`).join('\n\n')}</pre>{r.browserHost&&<details><summary>本机浏览器诊断</summary><pre>{JSON.stringify(r.browserHost,null,2)}</pre></details>}{r.recovery?.state==='needs_diagnosis'&&<p className="hint">仍需 Agent 继续排查；当前连接状态不能证明需要人工处理。</p>}</details>):<p className="muted">工作台触发的维护记录会显示在这里。</p>}</div>
     </section>
-    <section className="panel"><h2>账户</h2><p>使用本机 Codex 的官方 ChatGPT 订阅登录。</p><Button onClick={async()=>{const result=await api('login',{});const url=new URL(result.authUrl);if(url.protocol!=='https:')throw new Error('登录地址异常');setAuthUrl(url.href);}}>打开官方登录</Button>{authUrl&&<a className="login-link" href={authUrl} target="_blank" rel="noreferrer">继续登录 <ExternalLink size={15}/></a>}</section>
+    <section className="panel"><h2>账户</h2><p>使用本机 Codex 的官方 ChatGPT 订阅登录。</p><Button onClick={login}>打开官方登录</Button>{authUrl&&<a className="login-link" href={authUrl} target="_blank" rel="noreferrer">继续登录 <ExternalLink size={15}/></a>}</section>
     <RetrievalSettings/>
     {state.moraine && <section className="panel"><div className="section-heading"><h2>Moraine 长期记忆</h2>
       <Badge>{{ ready:'运行中', starting:'正在启动', missing:'待安装', offline:'离线' }[state.moraine.status]}</Badge></div>
@@ -33,7 +58,7 @@ export default function Settings() {
       {state.moraine.error && <p className="alert error">{state.moraine.error}</p>}
       {state.moraine.status === 'ready' ? <div className="actions">
         <a className="secondary" href={state.moraine.url} target="_blank" rel="noreferrer">打开记忆库 <ExternalLink size={15}/></a>
-        <Button onClick={async()=>{const {token}=await api('moraine',{action:'access'});await navigator.clipboard.writeText(token);toast('已复制，可粘贴到记忆库登录框');}}>复制访问令牌</Button>
+        <Button onClick={openMemory}>复制令牌并打开</Button>
       </div> : state.moraine.status === 'missing' ? <p className="hint">在项目目录运行 <code>npm run moraine:install</code> 后重新启动工作台。</p>
       : <Button disabled={state.moraine.status === 'starting'} onClick={async()=>{await api('moraine',{action:'start'});await refresh();}}>启动记忆库</Button>}
       <small>{state.moraine.dir}</small>

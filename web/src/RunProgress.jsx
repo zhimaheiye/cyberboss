@@ -26,6 +26,10 @@ export default function RunProgress({ run, expanded = false, showLatestUpdate = 
     <details open={open} onToggle={e=>setOpen(e.currentTarget.open)}><summary>执行详情 · {run.steps?.length||0} 步{run.omittedSteps?`（更早 ${run.omittedSteps} 步已省略）`:''}</summary>
       {error&&<div className="alert error">{error}</div>}
       {detail?<>{detail.detailSource==='codex-session'&&<p className="hint">从本机 Codex 会话补录工具正文，包含 exec / wait 等调用；原步骤保留。</p>}{detail.detailNote&&<p className="hint">{detail.detailNote}</p>}
+      {detail.memoryRecall&&<details className="hint"><summary>Moraine 记忆 · {{ready:'已查询',offline:'未连接',failed:'召回失败'}[detail.memoryRecall.status]}</summary>
+        <small>{timestamp(detail.memoryRecall.at)}</small>{detail.memoryRecall.error&&<p className="alert error">{detail.memoryRecall.error}</p>}
+        <p className="preserve-lines">{detail.memoryRecall.text||'本轮没有提供记忆线索。'}</p>
+      </details>}
       {detail.checkAttempts?.length>0&&<div className="step-list"><h4>来源核查与替代尝试</h4>{detail.checkAttempts.map(a=><article key={a.id} className="step-detail"><Badge value={a.status}/><strong>{a.method}</strong><small> · {timestamp(a.at)}</small><p>{a.target}</p><pre>{a.detail}</pre></article>)}</div>}
       {detail.verification?.evidence?.length>0&&<details><summary>核验来源</summary><ul>{detail.verification.evidence.map((e,i)=><li key={i}>{e}</li>)}</ul></details>}
       <div className="step-list">{[...(detail.steps||[]),...(detail.toolDetails||[]).map(s=>({...s,id:`raw-${s.id}`,name:`工具正文 · ${s.name}`}))].map((s,i)=><details className="step-detail" key={s.id||`${s.at}-${i}`} open={s.status==='failed'?true:undefined}><summary><Badge value={s.status}/><span className="step-title">{s.name}<small>{s.summary||'旧记录未保存操作参数'}</small></span><small>{timestamp(s.startedAt||s.at)} · {s.startedAt?duration(s.durationMs??(s.status==='running'?now-Date.parse(s.startedAt):NaN)):'耗时未记录'}</small></summary>

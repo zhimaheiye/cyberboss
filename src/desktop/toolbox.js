@@ -15,14 +15,43 @@ class Toolbox {
     return data;
   }
   save(data) { writeJson(this.file, data); this.revision++; }
+  manageNote(args) {
+    const data = this.load();
+    const original = structuredClone(data);
+    const subscriptions = this.store.data.workSubscriptions || [];
+    const result = this.store.memory(args);
+    if (args.action !== 'rename' || result.name === args.name) return result;
+    const oldRef = `note:${encodeURIComponent(args.name)}`, newRef = `note:${encodeURIComponent(result.name)}`;
+    for (const link of data.links) for (const side of ['from','to']) {
+      if (link[`${side}Ref`] !== oldRef) continue;
+      link[`${side}Ref`] = newRef; link[`${side}Title`] = result.name;
+      // Keep the evidence hash: renaming must not silently re-confirm stale content.
+      link.version++; link.updatedAt = new Date().toISOString();
+    }
+    const changedSubscriptions = subscriptions.map(s => s.kind === 'reference' && s.target === oldRef
+      ? { ...s, target:newRef, version:s.version + 1 } : s);
+    try {
+      this.save(data);
+      this.store.data.workSubscriptions = changedSubscriptions;
+      this.store.save();
+    }
+    catch (error) {
+      this.store.data.workSubscriptions = subscriptions;
+      this.save(original);
+      this.store.memory({ action:'rename', name:result.name, newName:args.name, expectedText:result.text });
+      throw error;
+    }
+    return result;
+  }
   async invoke(args, actor = 'agent') {
     const data = this.load();
     if (args.action === 'list') {
       const q = str(args.query || '', 2000).toLocaleLowerCase();
-      const items = data.tools.filter(t => (args.includeArchived || !t.archived) && (!q || JSON.stringify(t).toLocaleLowerCase().includes(q)))
+      const items = data.tools.filter(t => (args.includeArchived || !t.archived) && (!args.tag || t.tags.includes(args.tag)) && (!q || JSON.stringify(t).toLocaleLowerCase().includes(q)))
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
       const offset = Math.max(0, Math.floor(Number(args.offset) || 0));
-      return { items: items.slice(offset, offset + 50), nextOffset: offset + 50 < items.length ? offset + 50 : null, total: items.length };
+      return { items: items.slice(offset, offset + 50), nextOffset: offset + 50 < items.length ? offset + 50 : null, total: items.length,
+        tags:[...new Set(data.tools.filter(t=>args.includeArchived||!t.archived).flatMap(t=>t.tags))].sort() };
     }
     if (args.action === 'get') {
       const tool = data.tools.find(t => t.id === args.id); if (!tool) throw new Error('工具条目不存在'); return tool;

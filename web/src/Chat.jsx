@@ -3,7 +3,8 @@ import { AssistantRuntimeProvider, useExternalStoreRuntime, useAuiState, ThreadP
 import { MarkdownTextPrimitive } from '@assistant-ui/react-markdown';
 import remarkGfm from 'remark-gfm';
 import RunProgress from './RunProgress';
-import HandledToday from './HandledToday';
+import ReminderActions from './ReminderActions';
+import MessageSave from './MessageSave';
 import { safeHref, WorkspaceLink, remarkWorkspaceLinks } from './LocalLinks';
 import { ArrowUp, ArrowDown, Paperclip, Square, Copy, X, Sparkles, Bell, LoaderCircle } from 'lucide-react';
 import { api, Button, Form, Field, fmt, labels, useWorkbench, Empty } from './shared';
@@ -27,8 +28,7 @@ function convertMessage(message) {
     content: [{ type: 'text', text: message.text || '' }], createdAt: new Date(message.createdAt),
     ...(message.role !== 'user' ? { status: message.streaming ? { type: 'running' } : { type: 'complete', reason: 'stop' } } : {}),
     attachments: message.role === 'user' ? (message.images || []).map(image => ({ id: image.id, name: image.name, type: 'image', status: { type: 'complete' }, content: [{ type: 'image', image: `/api/chat-image?id=${encodeURIComponent(image.id)}` }] })) : [],
-    metadata: { custom: { kind: message.kind, reminderJobId: !message.jobException && !message.verificationException && ['proactive','reminder'].includes(message.kind) ? message.jobId : null,
-      delivery: message.delivery, steps: message.steps, streaming: message.streaming } },
+    metadata: { custom: { kind: message.kind, delivery: message.delivery, streaming: message.streaming } },
   };
 }
 function ImageAttachment({ removable = false }) {
@@ -41,19 +41,29 @@ function ImageAttachment({ removable = false }) {
 }
 const DraftAttachment = () => <ImageAttachment removable/>;
 const Markdown = () => <MarkdownTextPrimitive className="markdown" smooth={false} remarkPlugins={[remarkGfm, remarkWorkspaceLinks]} urlTransform={safeHref} components={{ img: () => null, a: ({ node, ...props }) => <WorkspaceLink {...props}/> }}/>;
+function QueueSend({ runtime }) {
+  const canSend = useAuiState(s=>s.composer.canSend);
+  return <button type="button" className="send-button" disabled={!canSend} aria-label="加入发送队列" title="加入发送队列" onClick={()=>runtime.thread.composer.send()}><ArrowUp size={20}/></button>;
+}
 function Message() {
   const message = useAuiState(s => s.message);
+  const {state}=useWorkbench();
+  const [showRun,setShowRun]=useState(false);
+  const original=state.messages.find(m=>m.id===message.id);
+  const run=state.runs.find(r=>r.queueId===message.id);
   const user = message.role === 'user', meta = message.metadata.custom || {};
   const name = user ? '你' : meta.kind === 'proactive' ? '主动消息' : meta.kind === 'reminder' ? '到点提醒' : meta.kind === 'error' ? '运行提示' : 'CyberBoss';
+  if(meta.kind==='topic')return <MessagePrimitive.Root className="topic-divider" id={`message-${message.id}`}>新话题 · {fmt(message.createdAt)}</MessagePrimitive.Root>;
   return <MessagePrimitive.Root className={`chat-message ${user ? 'from-user' : 'from-agent'} ${meta.kind || ''}`} id={`message-${message.id}`}>
     {!user && <div className="message-avatar">{['proactive','reminder'].includes(meta.kind) ? <Bell size={17}/> : <Sparkles size={17}/>}</div>}
     <div className="message-content"><div className="message-meta"><strong>{name}</strong><time>{fmt(message.createdAt)}</time></div>
       <div className="message-bubble"><MessagePrimitive.Parts components={{ Text: Markdown }}/><div className="attachments"><MessagePrimitive.Attachments components={{ Attachment: ImageAttachment }}/></div>
         {meta.streaming && !message.content.some(p => p.type === 'text' && p.text) && <div className="thinking" role="status"><span/><span/><span/>正在思考…</div>}
       </div>
-      {meta.steps?.length > 0 && <details className="steps"><summary>查看执行过程 · {meta.steps.length} 步</summary>{meta.steps.map((step,i) => <div key={i}><span>{step.name}</span><small>{step.status}</small></div>)}</details>}
+      {run&&run.status!=='running'&&<><Button className="text-button" onClick={()=>setShowRun(!showRun)}>{showRun?'收起':'查看'}执行过程 · {run.steps?.length||0} 步</Button>{showRun&&<RunProgress run={run} expanded showLatestUpdate={false}/>}</>}
       {meta.delivery && <small className="delivery">{meta.delivery}</small>}
-      {meta.reminderJobId && <HandledToday jobId={meta.reminderJobId} messageDate={message.createdAt}/>}
+      {original&&['proactive','reminder'].includes(meta.kind)&&<ReminderActions message={original}/>}
+      {!meta.streaming && original?.text && <MessageSave message={original}/>}
       {!meta.streaming && <ActionBarPrimitive.Root className="message-actions"><ActionBarPrimitive.Copy className="icon-button" title="复制消息" aria-label="复制消息"><Copy size={14}/></ActionBarPrimitive.Copy></ActionBarPrimitive.Root>}
     </div>
   </MessagePrimitive.Root>;
@@ -70,21 +80,28 @@ function Approval({ approval }) {
   </div>;
 }
 export default function Chat({ active }) {
-  const { state, connected, refresh, toast, draft, clearDraft, openMessage } = useWorkbench();
+  const { state, connected, refresh, toast, draft, clearDraft, openMessage, messageFocus } = useWorkbench();
   const [sending, setSending] = useState(false), [stopping, setStopping] = useState(false), [inbox, setInbox] = useState(false);
+  const [filter,setFilter]=useState('all'),[unreadOnly,setUnreadOnly]=useState(false);
+  useEffect(()=>{
+    if(!messageFocus)return;
+    setFilter('all');setInbox(false);
+    let inner;const frame=requestAnimationFrame(()=>{inner=requestAnimationFrame(()=>document.getElementById(`message-${messageFocus.id}`)?.scrollIntoView({block:'center',behavior:'smooth'}));});
+    return()=>{cancelAnimationFrame(frame);if(inner)cancelAnimationFrame(inner);};
+  },[messageFocus]);
   const submitted = useRef(null);
   const activeRun = state.runs.findLast(r => r.status === 'running' && !r.background);
   const running = sending || state.pendingChats.length > 0 || (state.agent.busy && !state.agent.background);
   const messages = useMemo(() => {
-    const items = state.messages.map(message => {
+    const items = state.messages.filter(m=>filter==='all'||(filter==='notices'?['proactive','reminder'].includes(m.kind):!['proactive','reminder'].includes(m.kind))).map(message => {
       const run = state.runs.find(r => r.queueId === message.id);
-      return { ...message, delivery: state.pendingChats.includes(message.id) ? '排队中' : run ? labels[run.status] || run.status : '', steps: run?.steps };
+      return { ...message, delivery: state.pendingChats.includes(message.id) ? '排队中' : run ? labels[run.status] || run.status : '' };
     });
-    if (state.agent.busy && !state.agent.background) items.push({ id:`stream-${state.agent.startedAt}`, role:'assistant', text:state.agent.text || activeRun?.latestUpdate, createdAt:state.agent.startedAt, streaming:true });
+    if (filter!=='notices' && state.agent.busy && !state.agent.background) items.push({ id:`stream-${state.agent.startedAt}`, role:'assistant', text:state.agent.text || activeRun?.latestUpdate, createdAt:state.agent.startedAt, streaming:true });
     return items;
-  }, [state.messages, state.runs, state.pendingChats, state.agent, activeRun]);
+  }, [state.messages, state.runs, state.pendingChats, state.agent, activeRun,filter]);
   const adapter = useMemo(() => createAttachmentAdapter(toast), [toast]);
-  const runtime = useExternalStoreRuntime({ messages, convertMessage, isRunning:running, isSendDisabled:!connected || running,
+  const runtime = useExternalStoreRuntime({ messages, convertMessage, isRunning:running, isSendDisabled:!connected || sending || stopping,
     adapters:{ attachments:adapter },
     onNew:async message => {
       const images = (message.attachments || []).map(a => ({ name:a.name, data:a.content.find(p => p.type === 'image')?.image?.split(',')[1] }));
@@ -106,11 +123,14 @@ export default function Chat({ active }) {
     },
     onCancel:async () => { setStopping(true); try { await api('chat/cancel', {}); await refresh(); } catch(error) { toast(error.message,true); } finally { setStopping(false); } },
   });
-  useEffect(() => { if (draft) { runtime.thread.composer.setText(draft); clearDraft(); } }, [draft, runtime, clearDraft]);
-  const notices = state.messages.filter(m => ['proactive','reminder'].includes(m.kind)).slice(-40).reverse();
+  useEffect(() => { if (draft) { setFilter('all');runtime.thread.composer.setText(draft); clearDraft(); } }, [draft, runtime, clearDraft]);
+  const notices = state.messages.filter(m => ['proactive','reminder'].includes(m.kind) && (!unreadOnly || m.unread)).slice(-80).reverse();
   return <div className="chat-page" hidden={!active}>
     <AssistantRuntimeProvider runtime={runtime}><ThreadPrimitive.Root className="thread">
-      <div className="chat-topbar"><span><span className={`status-dot ${running ? 'working' : ''}`}/>{state.agent.approvals.length ? '等待你的处理' : running ? state.pendingChats.length && state.agent.background ? '准备回复' : '正在回复' : '随时可以开始'}</span><Button onClick={() => setInbox(!inbox)}><Bell size={16}/>提醒箱 {notices.filter(m=>m.unread).length || ''}</Button></div>
+      <div className="chat-topbar"><span><span className={`status-dot ${running ? 'working' : ''}`}/>{state.agent.approvals.length ? '等待你的处理' : running ? '正在回复' : '随时可以开始'}</span>
+        <select aria-label="消息范围" value={filter} onChange={e=>setFilter(e.target.value)}><option value="all">全部消息</option><option value="chat">只看对话</option><option value="notices">只看提醒</option></select>
+        <Button disabled={running} onClick={async()=>{await api('chat/new-topic',{});setFilter('chat');await refresh();toast('已开启新话题');}}>新话题</Button>
+        <Button onClick={() => setInbox(!inbox)}><Bell size={16}/>提醒箱 {state.messages.filter(m=>m.unread).length || ''}</Button></div>
       <ThreadPrimitive.Viewport className="thread-viewport">
         {!messages.length && <div className="chat-welcome"><div className="welcome-icon"><Sparkles size={28}/></div><h2>一起把事情理清楚。</h2><p>聊聊计划、贴一张截图，或让我帮你跟进一件事。</p><div className="suggestions">{['看看最近还有什么没做的事','帮我安排接下来的一小时','帮我记住一件事'].map(text => <button key={text} className="secondary" onClick={() => runtime.thread.composer.setText(text)}>{text}</button>)}</div></div>}
         <ThreadPrimitive.Messages components={{ UserMessage:Message, AssistantMessage:Message, SystemMessage:Message }}/>
@@ -122,13 +142,18 @@ export default function Chat({ active }) {
       <div className="composer-dock"><ThreadPrimitive.ScrollToBottom className="scroll-latest secondary" aria-label="回到最新消息"><ArrowDown size={16}/>最新消息</ThreadPrimitive.ScrollToBottom>
         <ComposerPrimitive.Root className="composer"><ComposerPrimitive.AttachmentDropzone className="composer-dropzone">
           <div className="attachments"><ComposerPrimitive.Attachments components={{ Attachment:DraftAttachment }}/></div>
-          <ComposerPrimitive.Input className="composer-input" placeholder="发消息，或粘贴、拖入截图…" aria-label="消息内容" rows={1} maxRows={8} maxLength={50000} submitMode="enter"/>
+          <ComposerPrimitive.Input className="composer-input" placeholder={running?'可以继续发送，消息会依次处理…':'发消息，或粘贴、拖入截图…'} aria-label="消息内容" rows={1} maxRows={8} maxLength={50000} submitMode="enter"
+            onKeyDown={e=>{if(running&&e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing&&e.keyCode!==229){e.preventDefault();runtime.thread.composer.send();}}}/>
           <div className="composer-actions"><ComposerPrimitive.AddAttachment className="icon-button" title="添加图片" aria-label="添加图片"><Paperclip size={19}/></ComposerPrimitive.AddAttachment><small>Enter 发送 · Shift+Enter 换行</small><span className="spacer"/>
-            {running ? <ComposerPrimitive.Cancel className="send-button" disabled={sending || stopping} aria-label="停止回复" title="停止回复">{stopping ? <LoaderCircle size={18} className="spin"/> : <Square size={16}/>}</ComposerPrimitive.Cancel> : <ComposerPrimitive.Send className="send-button" aria-label="发送消息" title="发送消息"><ArrowUp size={20}/></ComposerPrimitive.Send>}
+            {running && <ComposerPrimitive.Cancel className="secondary" disabled={sending || stopping} aria-label="停止回复和排队消息" title="停止回复和排队消息">{stopping ? <LoaderCircle size={18} className="spin"/> : <Square size={16}/>}停止</ComposerPrimitive.Cancel>}
+            {running ? <QueueSend runtime={runtime}/> : <ComposerPrimitive.Send className="send-button" aria-label="发送消息" title="发送消息"><ArrowUp size={20}/></ComposerPrimitive.Send>}
           </div>
         </ComposerPrimitive.AttachmentDropzone></ComposerPrimitive.Root><p className="composer-caption">{!connected ? '本机服务未连接，草稿保留在当前页面' : state.agent.background ? '后台任务继续运行，可以在这里对话' : '图片与对话保存在这台电脑 · 支持 PNG / JPEG / WebP'}</p>
       </div>
     </ThreadPrimitive.Root></AssistantRuntimeProvider>
-    {inbox && <aside className="inbox"><div className="section-heading"><h2>提醒箱</h2><button className="icon-button" aria-label="关闭提醒箱" onClick={() => setInbox(false)}><X size={18}/></button></div><p className="muted">只有值得告诉你的事才会出现在这里。</p>{notices.length ? notices.map(m => <Button key={m.id} className={`notice ${m.unread ? 'unread' : ''}`} onClick={() => openMessage(m.id)}><span>{m.text.slice(0,160)}</span><small>{fmt(m.createdAt)} · {m.unread ? '未读' : '已读'}{m.pushStatus === 'failed' ? ' · 推送失败，消息已保留' : ''}</small></Button>) : <Empty>有新提醒时会留在这里。</Empty>}</aside>}
+    {inbox && <aside className="inbox"><div className="section-heading"><h2>提醒箱</h2><button className="icon-button" aria-label="关闭提醒箱" onClick={() => setInbox(false)}><X size={18}/></button></div>
+      <div className="actions"><label className="check"><input type="checkbox" checked={unreadOnly} onChange={e=>setUnreadOnly(e.target.checked)}/>只看未读</label><Button onClick={async()=>{await api('read-all',{before:new Date().toISOString()});await refresh();}}>全部已读</Button></div>
+      {notices.length ? notices.map(m=><article className="inbox-item" key={m.id}><Button className={m.unread?'notice unread':'notice'} onClick={()=>openMessage(m.id)}><span>{m.text.slice(0,160)}</span><small>{fmt(m.createdAt)} · {m.unread?'未读':'已读'}{m.pushStatus==='failed'?' · 推送失败，消息已保留':''}</small></Button><ReminderActions message={m}/></article>) : <Empty>有新提醒时会留在这里。</Empty>}
+    </aside>}
   </div>;
 }

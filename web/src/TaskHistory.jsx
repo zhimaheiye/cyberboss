@@ -4,7 +4,7 @@ import { api, tool, useWorkbench, Button, Badge, Empty, fmt, labels } from './sh
 export const completionAuthor = event => !event ? '完成来源未记录' : event.actor === 'user' ? '你已确认完成'
   : event.basis === 'user_statement' ? 'Agent 代记你的确认' : 'AI 判定完成 · 可核查';
 const actions = { created: '创建待办', completed: '判定完成', occurrence_completed: '判定本期完成',
-  reopened: '重新打开', confirmed: '确认已完成', job_acknowledged: '记录本次已处理', job_status_changed: '更改托管状态',
+  reopened: '重新打开', confirmed: '确认已完成', edited:'编辑待办', trashed:'移到回收站', job_acknowledged: '记录本次已处理', job_acknowledgement_undone: '撤销当天确认', job_status_changed: '更改托管状态',
   uncertain: '操作结果需核对', requested: '已发起操作，尚无结果记录', receipt: '已收到回执，详细记录未完成' };
 export function TaskEvent({ event }) {
   const e = event;

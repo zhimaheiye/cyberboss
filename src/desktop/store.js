@@ -68,6 +68,22 @@ class DesktopStore {
     if (!/^[^<>:"/\\|?*\x00-\x1f]{1,120}\.md$/u.test(name) || name.includes("..")) throw new Error("记忆文件名必须是普通的 .md 文件名");
     const file = path.join(dir, name);
     if (args.action === "read") return { name, text: fs.readFileSync(file, "utf8") };
+    if (args.action === 'rename' || args.action === 'trash') {
+      if (args.expectedText !== fs.readFileSync(file, 'utf8')) throw new Error('笔记已变化，请重新读取后操作');
+      if (args.action === 'rename') {
+        const newName = String(args.newName || '');
+        if (!/^[^<>:"/\\|?*\x00-\x1f]{1,120}\.md$/u.test(newName) || newName.includes('..')) throw new Error('请填写有效的 .md 文件名');
+        if (newName === name) return { name, text:args.expectedText };
+        const target = path.join(dir, newName);
+        if (fs.existsSync(target)) throw new Error('同名笔记已存在');
+        fs.renameSync(file, target);
+        return { name:newName, text:args.expectedText };
+      }
+      const trashDir = path.join(dir, '.trash');
+      fs.mkdirSync(trashDir, { recursive:true });
+      fs.renameSync(file, path.join(trashDir, crypto.randomUUID() + '-' + name));
+      return { name, trashed:true };
+    }
     if (args.action !== "write") throw new Error("未知记忆操作");
     const text = String(args.text || "");
     if (text.length > 200000) throw new Error("单份记忆最多 20 万字");

@@ -107,13 +107,18 @@ class DesktopAgent {
       if (run) { run.threadId = threadId; run.progress = { phase: "model", lastEventAt: new Date().toISOString() }; }
       const instructions = fs.readFileSync(path.resolve(__dirname, "../../templates/desktop-instructions.md"), "utf8");
       const job = run?.jobId && this.store.data.jobs.find(j => j.id === run.jobId);
-      const history = this.store.data.messages;
+      const history = this.store.data.messages.filter(m => (m.topicId || null) === (this.store.data.chatTopicId || null));
       const currentIndex = history.findIndex(m => m.id === run?.queueId);
       const recent = background ? [] : history.slice(0, currentIndex < 0 ? history.length : currentIndex)
         .filter(m => m.kind === 'chat' && m.text).slice(-2);
       // Recall the task itself, without sending serialized job state or a Magpie handoff.
       const query = job ? [job.title, job.instructions].filter(Boolean).join('\n') : text;
-      const memoryClues = await this.moraine?.prepare(query, recent);
+      const recall = await this.moraine?.prepare(query, recent) || { status:'offline', text:'', error:'' };
+      const memoryClues = recall.text;
+      if (run) {
+        run.memoryRecall = { ...recall, at: new Date().toISOString() };
+        this.store.save(); this.changed();
+      }
       if (this.active !== active || run?.cancelRequested) throw new Error("本次任务已取消");
       const context = {
         now: new Date().toISOString(), timezone: "Asia/Shanghai", mode: background ? "background" : "chat",
@@ -126,12 +131,12 @@ class DesktopAgent {
         personalPreferences: this.store.data.promptPreferences?.versions?.at(-1)?.text || '',
         workProgress: run?.jobId ? this.store.data.workStates?.[run.jobId] || null : null,
         incomingEvents: run?.inputEvents || [],
-        recentMessages: background ? [] : this.store.data.messages.slice(-16).map(m => ({ role: m.role, text: m.text })),
+        recentMessages: background ? [] : history.slice(0, currentIndex < 0 ? history.length : currentIndex).slice(-16).map(m => ({ role: m.role, text: m.text })),
         activeJobs: this.store.data.jobs.filter(j => j.status === "active"
           && !(Date.parse(j.suppressUntil) > Date.now()) && !(Date.parse(j.activeFrom) > Date.now()) && !(Date.parse(j.activeUntil) < Date.now())).map(j => ({
           id: j.id, title: j.title, kind: j.kind, contexts: j.contexts, nextRunAt: j.nextRunAt,
           suppressUntil: j.suppressUntil, activeFrom: j.activeFrom, activeUntil: j.activeUntil,
-          minimumGapMinutes: j.minimumGapMinutes, lastNotifiedAt: j.lastNotifiedAt, acknowledgedValues: j.acknowledgedValues,
+          minimumGapMinutes: j.minimumGapMinutes, notificationCadence: j.notificationCadence || (j.minimumGapMinutes === 1440 ? 'daily' : 'interval'), lastNotifiedAt: j.lastNotifiedAt, acknowledgedValues: j.acknowledgedValues,
         })),
       };
       active.turnRequested = true;

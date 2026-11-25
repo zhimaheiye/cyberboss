@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, GitBranch, Plus, Pencil, RotateCcw, BookOpen, Check } from 'lucide-react';
-import { api, tool, useWorkbench, Button, Dialog, Form, Field, Empty } from './shared';
+import { api, useWorkbench, Button, Dialog, Form, Field, Empty } from './shared';
+import CreateTask from './CreateTask';
 
 const newScene = () => ({ id: crypto.randomUUID(), title: '新的场景', description: '', entry: 'start', nodes: [
   { id: 'start', type: 'question', text: '想从哪里开始？', detail: '', options: [{ label: '继续', next: 'result' }] },
@@ -42,11 +43,10 @@ function BranchEditor({ scene, save, remove, close }) {
 }
 
 export default function DecisionGuide({ active }) {
-  const { ask, go, refreshTasks, toast } = useWorkbench();
+  const { ask, go, toast } = useWorkbench();
   const [data, setData] = useState(null), [error, setError] = useState(''), [tab, setTab] = useState('guide');
   const [session, setSession] = useState(null), [trail, setTrail] = useState([]), [editing, setEditing] = useState(null), [reference, setReference] = useState(null);
   const [addingTask, setAddingTask] = useState(false), [created, setCreated] = useState({});
-  const createRequest = useRef(null);
   const heading = useRef(null);
   useEffect(() => {
     if (!active || data) return;
@@ -80,11 +80,6 @@ export default function DecisionGuide({ active }) {
     {editing && <BranchEditor scene={editing} close={() => setEditing(null)} save={scene => saveScenes(data.scenarios.some(s => s.id === scene.id) ? data.scenarios.map(s => s.id === scene.id ? scene : s) : [...data.scenarios, scene])}
       remove={data.scenarios.length > 1 && data.scenarios.some(s => s.id === editing.id) ? () => saveScenes(data.scenarios.filter(s => s.id !== editing.id)) : null}/>}
     {reference && <Dialog title={reference.name.replace(/\.(md|txt)$/, '')} onClose={() => setReference(null)} wide><div className="decision-reference">{reference.text}</div></Dialog>}
-    {addingTask && node && <Dialog title="加入待办" onClose={() => setAddingTask(false)}><Form submit="添加待办" onSave={async fields => {
-      const item = { title: fields.get('title'), description: context };
-      const signature = JSON.stringify(item); if (createRequest.current?.signature !== signature) createRequest.current = { signature, id: crypto.randomUUID() };
-      await tool('opentodo_create_tasks', { items: [item], client_request_id: createRequest.current.id });
-      setCreated(previous => ({ ...previous, [resultKey]: true })); setAddingTask(false); toast('已加入待办'); await refreshTasks();
-    }}><Field label="待办标题" name="title" defaultValue={node.text.slice(0, 300)} required maxLength={300}/><p className="hint">本次选择和结果会作为待办说明保存。</p></Form></Dialog>}
+    {addingTask && node && <CreateTask title={node.text} description={context} close={() => setAddingTask(false)} onCreated={() => setCreated(previous => ({ ...previous, [resultKey]: true }))}/>}
   </section>;
 }

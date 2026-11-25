@@ -30,6 +30,35 @@ class TaskHistory {
     this.tail = result.catch(() => {});
     return result;
   }
+  edit({ id, expected, patch }, trash = false) {
+    return this.serial(async () => {
+      const cookie = await this.todo.browserSession();
+      const { task } = await this.todo.call('get_task', { id, timezone:'Asia/Shanghai' });
+      const editable = t => ({ title:t.untrusted_text?.title || t.title || '', description:t.untrusted_text?.description || t.description || '',
+        due:t.due || null, completed:!!t.completed, recurrence:t.recurrence || null });
+      if (!expected || JSON.stringify(editable(task)) !== JSON.stringify(editable(expected))) throw new Error('待办已变化，请重新打开后操作');
+      let changes;
+      if (!trash) {
+        if (typeof patch?.title !== 'string' || !patch.title.trim() || patch.title.length > 300
+          || typeof patch.description !== 'string' || patch.description.length > 20000) throw new Error('请填写标题，说明最多 2 万字');
+        changes = { title:patch.title.trim(), description:patch.description, due:patch.due };
+        if (changes.due !== null && (!changes.due || !/^\d{4}-\d{2}-\d{2}$/.test(changes.due.date))) throw new Error('日期无效');
+        if (changes.due) changes.due = { date:changes.due.date, ...(changes.due.time ? { time:changes.due.time, tz:'Asia/Shanghai' } : {}) };
+      }
+      const action = trash ? 'trashed' : 'edited';
+      const request = this.store.add('taskEvents', { action:'requested', tool:action, taskIds:[id], actor:'user', before:editable(task) });
+      try {
+        // The pinned upstream REST endpoint atomically patches the entire due object.
+        // Its MCP schedule tool preserves an old time when the field is omitted.
+        await this.todo.request('/api/v1/tasks/' + encodeURIComponent(id), trash ? 'DELETE' : 'PATCH', changes, cookie);
+      } catch (error) {
+        this.store.add('taskEvents', { action:'uncertain', requestId:request.id, taskId:id, actor:'user', evidence:error.message });
+        throw error;
+      }
+      return this.store.add('taskEvents', { action, requestId:request.id, taskId:id, title:editable(task).title,
+        actor:'user', before:editable(task), after:changes || null, evidence:trash ? '用户移入 OpenTodo 回收站' : '用户编辑待办' });
+    });
+  }
   list({ taskId, before, limit = 100 } = {}) {
     const size = Math.max(1, Math.min(200, Number(limit) || 100));
     const recorded = this.store.data.taskEvents;

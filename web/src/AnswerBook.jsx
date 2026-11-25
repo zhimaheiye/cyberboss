@@ -136,7 +136,7 @@ export default function AnswerBook() {
         <div className="answer-shelf-label"><span/>THE BOOK OF ANSWERS<span/></div>
         <div className="answer-stage">
           <BookScene result={result} opening={phase === 'opening'} onOpened={() => setPhase('idle')}/>
-          {!result && <Button className="answer-cover-hit" onClick={draw} disabled={busy || !data.available[pool]} aria-label="翻开答案之书"/>}
+          <Button className="answer-cover-hit" onClick={draw} disabled={busy || !data.available[pool]} aria-label={result?'再翻一页':'翻开答案之书'}/>
         </div>
         <div className="answer-result-accessible" role="status" aria-live="polite">{phase === 'loading' ? '正在抽取…' : phase === 'opening' ? '正在翻开…' : result ? result.text : ''}</div>
         {result && phase === 'idle' && <div className="answer-result-actions">

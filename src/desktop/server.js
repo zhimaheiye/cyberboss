@@ -86,6 +86,10 @@ async function startDesktop(config) {
         const body = await readBody(req, url.pathname === "/api/chat" ? CHAT_BODY_LIMIT : undefined);
         let result;
         switch (url.pathname) {
+          case '/api/notes/manage':
+            if (auth) throw new Error('请通过工作台管理笔记');
+            if (!['rename','trash'].includes(body.action)) throw new Error('未知笔记操作');
+            result = app.toolbox.manageNote(body); break;
           case '/api/moraine':
             if (auth) throw new Error('请在工作台设置页管理 Moraine');
             if (body.action === 'start') { app.moraine.start(); result = app.moraine.view(); }
@@ -150,6 +154,25 @@ async function startDesktop(config) {
             result = await app.taskHistory.confirm(body); app.taskRevision++; break;
           case "/api/jobs/save": result = app.jobs.save(body, auth ? 'agent' : 'user'); break;
           case "/api/jobs/acknowledge": result = app.jobs.acknowledge(body, auth ? 'agent' : 'user'); break;
+          case '/api/tasks/edit':
+          case '/api/tasks/trash':
+            if (auth) throw new Error('请通过工作台编辑待办');
+            result = await app.taskHistory.edit(body, url.pathname.endsWith('/trash'));
+            app.taskRevision++; app.retrieval.sources.invalidateTasks(); break;
+          case "/api/jobs/undo-today":
+            if (auth) throw new Error('请通过工作台撤销当天确认');
+            result = app.jobs.undoToday(body); break;
+          case "/api/chat/new-topic":
+            if (auth) throw new Error('请通过工作台开启新话题');
+            result = app.newTopic(); break;
+          case "/api/read-all":
+            if (auth) throw new Error('请通过工作台管理已读状态');
+            for (const message of app.store.data.messages) {
+              if (['proactive', 'reminder'].includes(message.kind) && message.unread && Date.parse(message.createdAt) <= Date.parse(body.before)) {
+                message.unread = false; message.readAt = new Date().toISOString(); message.pushStatus = 'cancelled';
+              }
+            }
+            app.store.save(); result = { read: true }; break;
           case "/api/jobs/run": result = app.runJob(body.id); break;
           case "/api/events": {
             const events = app.work.emit({ ...body, source: body.source || 'external', key: body.key || require('crypto').randomUUID() }, auth ? 'external' : 'user');
@@ -160,7 +183,7 @@ async function startDesktop(config) {
           case "/api/read": {
             const message = app.store.data.messages.find(m => m.id === body.id);
             if (!message) throw new Error("消息不存在");
-            message.unread = false; message.readAt = new Date().toISOString(); app.store.save(); result = { read: true }; break;
+            message.unread = false; message.readAt = new Date().toISOString(); message.pushStatus = 'cancelled'; app.store.save(); result = { read: true }; break;
           }
           case "/api/opentodo/open": {
             const cookie = await app.todo.browserSession();

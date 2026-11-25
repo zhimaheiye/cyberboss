@@ -93,8 +93,8 @@ function finishProgress(run, status = 'interrupted') {
   touch(run, 'finished', now);
 }
 function runSummary(run) {
-  const { updates, toolDetails, checkAttempts, ...summary } = run;
-  return { ...summary, latestUpdate: updates?.at(-1)?.text?.slice(0, 500),
+  const { updates, toolDetails, checkAttempts, memoryRecall, ...summary } = run;
+  return { ...summary, ...(memoryRecall ? { memoryRecall:{ status:memoryRecall.status, at:memoryRecall.at, error:memoryRecall.error } } : {}), latestUpdate: updates?.at(-1)?.text?.slice(0, 500),
     checkAttemptCount: checkAttempts?.length || 0,
     steps: run.steps?.map(({ input, output, ...step }) => ({ ...step, hasDetails: !!(input || output) })) };
 }
