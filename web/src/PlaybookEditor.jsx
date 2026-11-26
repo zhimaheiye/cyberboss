@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Button, Dialog, Field, Form, api } from './shared';
 
-export const makeMethod = () => ({ id:crypto.randomUUID(), label:'我的方法', steps:['写下一个可以动手的动作'], enabled:true, personal:true });
+export const makeMethod = () => ({ id:crypto.randomUUID(), label:'我的方法', steps:['选定一个能独立完成的子任务，明确交付物和完成条件。'], enabled:true, personal:true });
 const makeReason = () => ({ id:crypto.randomUUID(), title:'我的卡点', question:'哪种做法比较顺手？', enabled:true, pins:[], strategies:[makeMethod()] });
 function move(items, index, delta) {
   const result = items.slice();
@@ -32,7 +32,7 @@ export default function PlaybookEditor({ book, initialId, saved, close }) {
       <Order index={index} length={reasons.length} change={delta=>setReasons(move(reasons,index,delta))}/></div>
     {reason.strategies.map((s,i)=><section className="panel" key={s.id}>
       <Field label="方法名称"><input required maxLength={120} value={s.label} onChange={e=>method(i,{label:e.target.value})}/></Field>
-      <Field label="行动步骤（每行一句，越往下越小）"><textarea rows={4} value={s.steps.join('\n')} onChange={e=>method(i,{steps:e.target.value.split('\n')})}/></Field>
+      <Field label="行动建议（每行一个可独立完成的范围）" hint="先写完整建议，再按需要补充范围更窄的做法。"><textarea rows={4} value={s.steps.join('\n')} onChange={e=>method(i,{steps:e.target.value.split('\n')})}/></Field>
       <div className="actions"><label className="check"><input type="checkbox" checked={s.enabled} onChange={e=>method(i,{enabled:e.target.checked})}/>启用</label>
         <Order index={i} length={reason.strategies.length} change={delta=>update({strategies:move(reason.strategies,i,delta)})}/></div>
     </section>)}

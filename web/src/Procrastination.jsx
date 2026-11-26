@@ -113,13 +113,13 @@ export default function Procrastination({active,entry,startBreathing}) {
         {book.stats[reason.id+'/'+s.id]?.started>0&&<small>开始过 {book.stats[reason.id+'/'+s.id].started} 次</small>}</Button>)}</div>
     </section>}
     {reason&&method&&<><section className="panel start-step">
-      <small>{reason.title} · {method.label}</small><h2>现在这一步</h2><p className="start-instruction">{step}</p>
+      <small>{reason.title} · {method.label}</small><h2>行动建议</h2><p className="start-instruction">{step}</p>
       <div className="actions">
-        <Button onClick={()=>{if(!override&&level+1<method.steps.length){setLevel(level+1);resetFeedback();}else setCustom(true);}}>再拆小一点</Button>
-        <Button onClick={()=>setCustom(true)}>改成我的做法</Button>
+        {!override&&level+1<method.steps.length&&<Button onClick={()=>{setLevel(level+1);resetFeedback();}}>缩小本次范围</Button>}
+        <Button onClick={()=>setCustom(true)}>编辑行动建议</Button>
         {methods.length>1&&<Button onClick={()=>chooseMethod('')}>换个方法</Button>}
       </div><FiveMinutes/>
-      <StartActions key={method.id+level+step} task={task} subject={subject} step={step} hint={override?'':method.steps[level+1]} reason={reason} resources={resources} soon={soon} startBreathing={startBreathing}/>
+      <StartActions key={method.id+level+step} task={task} subject={subject} step={step} reason={reason} resources={resources} soon={soon} startBreathing={startBreathing}/>
       <div className="start-feedback"><small>{recorded?'这次反馈已记录':'这次怎么样？'}</small><div className="actions">
         <Button disabled={recorded} onClick={()=>feedback('started')}>开始动了</Button><Button disabled={recorded} onClick={()=>feedback('stuck')}>还是卡住</Button>
         <Button disabled={recorded} onClick={()=>feedback('deferred')}>改期或转交了</Button></div></div>

@@ -24,30 +24,21 @@ class Procrastination {
   constructor(app) {
     this.app = app;
     this.dir = path.join(app.store.dir, 'procrastination');
-    this.firstStepFile = path.join(this.dir, 'first-step.json');
-    this.firstStep = read(this.firstStepFile, null);
   }
-  updateFirstStep(input) {
-    const current = this.firstStep;
-    if (input.expectedId !== (current?.id ?? null)) throw new Error('首页的第一步已更新，请重新打开后再试');
-    let next;
-    if (input.action === 'finishFirstStep') {
-      if (!current) throw new Error('没有可完成的第一步');
-      if (current.finishedAt) return current;
-      next = { ...current, finishedAt:new Date().toISOString() };
-    } else {
-      const tomorrow = new Intl.DateTimeFormat('en-CA', {
-        timeZone:'Asia/Shanghai', year:'numeric', month:'2-digit', day:'2-digit',
-      }).format(Date.now() + 86400000);
-      next = { id:require('node:crypto').randomUUID(), date:tomorrow, subject:string(input.subject, 500, true),
-        step:string(input.step, 600), hint:string(input.hint, 600, true) };
+  book() {
+    const book = read(path.join(this.dir, 'playbook.json'), { revision:0, reasons:starters });
+    for (const reason of book.reasons) {
+      const defaults = starters.find(item => item.id === reason.id);
+      if (!defaults) continue;
+      reason.strategies = reason.strategies.map(strategy => {
+        const fallback = defaults.strategies.find(item => item.id === strategy.id);
+        return !strategy.personal && fallback
+          ? { ...strategy, label:fallback.label, steps:fallback.steps }
+          : strategy;
+      });
     }
-    writeJson(this.firstStepFile, next);
-    this.firstStep = next;
-    this.app.changed();
-    return next;
+    return book;
   }
-  book() { return read(path.join(this.dir, 'playbook.json'), { revision:0, reasons:starters }); }
   history() { return read(path.join(this.dir, 'history.json'), []); }
   stats(history = this.history()) {
     const stats = {};
@@ -64,7 +55,7 @@ class Procrastination {
     if (input.revision !== current.revision) throw new Error('速查表已在别处更新，请重新读取后保存');
     const reasons = unique(input.reasons, 60).map(r => {
       const strategies = unique(r.strategies, 40).map(s => {
-        if (!Array.isArray(s.steps) || !s.steps.length || s.steps.length > 15) throw new Error('每个方法需有 1～15 个由大到小的动作');
+        if (!Array.isArray(s.steps) || !s.steps.length || s.steps.length > 15) throw new Error('每个方法需有 1～15 个可选范围');
         return { id:s.id, label:string(s.label, 120), enabled:!!s.enabled, personal:!!s.personal,
           steps:s.steps.map(step => string(step, 600)) };
       });

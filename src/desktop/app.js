@@ -73,7 +73,7 @@ class DesktopApp {
     const pendingChats = this.queue.peekForAccount("desktop")
       .filter(entry => JSON.parse(entry.text).background === false).map(entry => entry.id);
     return { settings: d.settings, magpie: this.magpie.view(), jobs: d.jobs, work: this.work.overview(), runs: d.runs.slice(-200).map(runSummary), messages: d.messages.slice(-300),
-      pendingChats, maintenance: this.maintenance.view(), breathing: this.breathing.view(), firstStep: this.procrastination.firstStep,
+      pendingChats, maintenance: this.maintenance.view(), breathing: this.breathing.view(),
       learnedSkills: this.skills.invoke({ action: "list" }),
       ...observationViews(d.observations), agent: this.agent.view(), taskService: { url: this.todo.url, error: this.todo.error },
       memoryDir: path.join(this.store.dir, "memory"), stateDir: this.store.dir, error: this.error || "",
