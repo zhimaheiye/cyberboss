@@ -20,11 +20,33 @@ function nextRun(job, after = new Date()) {
   const [y, m, d] = date.split("-").map(Number);
   const [h, minute] = String(s.time || "09:00").split(":").map(Number);
   if (!y || !m || !d || !Number.isInteger(h) || h < 0 || h > 23 || !Number.isInteger(minute) || minute < 0 || minute > 59) throw new Error("调度日期或时间无效");
-  const opts = RRule.parseString(String(s.rrule || ""));
+  const invalidRule = "周期规则（RRULE）参数无效，请检查日期、月份或星期写法";
+  let opts;
+  try {
+    opts = RRule.parseString(String(s.rrule || ""));
+  } catch (cause) {
+    throw new Error(invalidRule, { cause });
+  }
+  const invalidMonthDay = day => !Number.isInteger(day) || day === 0 || Math.abs(day) > 31;
+  const values = value => value == null ? [] : [].concat(value);
+  if ((Array.isArray(opts.byweekday) && opts.byweekday.some(day => day == null))
+    || values(opts.bymonthday).some(invalidMonthDay)
+    || values(opts.bynmonthday).some(invalidMonthDay)
+    || values(opts.bymonth).some(month => !Number.isInteger(month) || month < 1 || month > 12)) {
+    throw new Error(invalidRule);
+  }
   if (opts.interval != null && (!Number.isInteger(opts.interval) || opts.interval < 1 || opts.interval > 10000)) throw new Error("周期间隔必须为 1～10000 的整数");
   if (opts.freq == null || opts.freq === RRule.SECONDLY || (opts.freq === RRule.MINUTELY && (opts.interval || 1) < 10)) throw new Error("检查间隔至少 10 分钟；请提供有效 RRULE");
-  const rule = new RRule({ ...opts, dtstart: new Date(Date.UTC(y, m - 1, d, h, minute)), tzid: zone });
-  return rule.after(after, false)?.toISOString() || null;
+  const activeFrom = Date.parse(job.activeFrom);
+  const searchAfter = activeFrom > after.getTime() ? new Date(activeFrom - 1) : after;
+  try {
+    const rule = new RRule({ ...opts, dtstart: new Date(Date.UTC(y, m - 1, d, h, minute)), tzid: zone });
+    const occurrence = rule.after(searchAfter, false);
+    if (!occurrence || occurrence.getTime() > Date.parse(job.activeUntil)) return null;
+    return occurrence.toISOString();
+  } catch (cause) {
+    throw new Error(invalidRule, { cause });
+  }
 }
 
 function notificationAllowed(job, now = Date.now()) {
@@ -76,7 +98,9 @@ class JobService {
     if (job.suppressUntil && !Number.isFinite(Date.parse(job.suppressUntil))) throw new Error("静默日期无效");
     for (const key of ["activeFrom", "activeUntil"]) if (job[key] && !Number.isFinite(Date.parse(job[key]))) throw new Error("有效窗口日期无效");
     const calculated = nextRun(job);
-    const changed = !existing || JSON.stringify(existing.schedule) !== JSON.stringify(job.schedule) || existing.timezone !== job.timezone || existing.status !== job.status;
+    const changed = !existing || JSON.stringify(existing.schedule) !== JSON.stringify(job.schedule)
+      || existing.timezone !== job.timezone || existing.status !== job.status
+      || existing.activeFrom !== job.activeFrom || existing.activeUntil !== job.activeUntil;
     job.nextRunAt = changed ? calculated : existing.nextRunAt;
     if (existing?.verificationRetry && (job.kind !== 'watch' || job.status === 'done')) {
       delete job.verificationRetry; delete existing.verificationRetry;

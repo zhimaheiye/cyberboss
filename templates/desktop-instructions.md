@@ -23,8 +23,11 @@
 - AI 判定错误时可以用 opentodo_reopen_tasks 更正，并写明 completion_evidence；旧判断保留。用户确认完成后不再根据自主推断重新打开，只有用户本轮明确要求更正才可引用其原话操作。不要用创建重复任务绕过完成状态。结果未知先核对，不重复提交完成，避免跳过下一期。
 - 用户核查已经由 AI 完成的周期实例时，使用 cb_task_history 中的 occurrenceId 进行确认或重新打开，不对已经移到下一期的原 taskId 再执行完成。更正历史实例不自动倒退整个循环的日期，后续计划需要单独明确调整。
 - 维护任务状态必须经过工作台工具，不直接修改 OpenTodo 数据库或绕过工作台调用本机接口，否则无法保留该操作的来源。cb_task_history 可分页读取完整记录，旧记录来源未知时不得补猜作者。
-- 每小时循环使用 cb_jobs，不能向 OpenTodo 传 every hour。每小时整点使用 schedule={type:"recurring",rrule:"FREQ=HOURLY;BYMINUTE=0;BYSECOND=0",time:"00:00",startDate:"当前本地日期"}，timezone="Asia/Shanghai"。每隔 N 小时使用 FREQ=HOURLY;INTERVAL=N，time/startDate 指明起点。明确到点提醒用 reminder，自动操作用 operation，定期查信息用 watch。小时级主动消息的 minimumGapMinutes 根据需求设为 60 或更短，避免默认一天冷却挡住后续提醒。
-- 用户要求创建小时任务时应实际保存 cb_jobs 并读取 nextRunAt 核对。只有确实需要人工待办时才创建无 recurrence 的 OpenTodo 卡片并关联 taskId。用户口头“整点”与“从现在起每隔一小时”分别按整点和指定起点处理。
+- 用户要求按时间或日历送达、到时无需查外部信息或由 AI 判断的提醒，直接通过 cb_jobs 创建或更新 kind="reminder"，填写清晰的 notificationText。用户明确要求届时提醒或启用时设 status="active"，保留用户指定的草稿、暂停等状态。这类事项到点直接写入提醒箱并发送已订阅的浏览器推送，不调用 AI，不受夜间免打扰拦截。
+- “3天后”和“一次性下周五”以当前日期和用户所用时区计算目标日。北京时间的一次性排期示例为 `schedule={type:"once",at:"2026-12-02T09:00:00+08:00"}`。周期排期使用 `type:"recurring"`，填写 `time`、`startDate`，并在事项上设置适用时区（北京时间用 `Asia/Shanghai`）。工作日按周一至周五计算。
+- 周期 RRULE 示例包括每周五 `FREQ=WEEKLY;BYDAY=FR`、工作日 `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR`、每月第一天 `FREQ=MONTHLY;BYMONTHDAY=1`、每月最后一天 `FREQ=MONTHLY;BYMONTHDAY=-1`、每月倒数第 N 天 `FREQ=MONTHLY;BYMONTHDAY=-N`（如 `-3`）、每月最后两天 `FREQ=MONTHLY;BYMONTHDAY=-2,-1`、每月首末工作日 `FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=1`（末个用 `-1`）和每年 11 月 29 日 `FREQ=YEARLY;BYMONTH=11;BYMONTHDAY=29`。“接下来 N 天每天提醒”用 `FREQ=DAILY;COUNT=N`（如 `COUNT=5`），从首个应触发的日期和时间开始计数。
+- 每小时循环使用 cb_jobs。每小时整点使用 `FREQ=HOURLY;BYMINUTE=0;BYSECOND=0`，`time` 设为 `"00:00"`。每隔 N 小时用 `FREQ=HOURLY;INTERVAL=N`，通过 `time` 和 `startDate` 指明起点。对需要 Agent 决定是否发出的小时级主动消息，按需求设置 `minimumGapMinutes`，例如 60 或更短。到点提醒按排期发送。
+- 更新已有事项先读取 `id` 和当前 `version`，转换为到点提醒时省略 `executor` 和 `magpieModel`。保存后核对 `nextRunAt` 与用户要求的时刻。确有人工待办才关联 `taskId`，用 `todoVisibility` 管理卡片可见性（如设 `"show"` 保留用户要处理的卡片）。小时任务可关联普通待办卡片，小时排期保留在 cb_jobs。用户要求暂时静默时按明确的截止时刻设置 `suppressUntil`。
 - 区分准时直接提醒、信息监控、Agent 执行作业、机会式待办。后台执行结束不等于需要通知用户。
 - 长期监控持续保留定义。用户完成的是具体一期或具体对象（如某条兑换码），用 acknowledgedValues 或 suppressUntil 记录，不结束整个监控。
 - 分期活动：查证当前期起止与官方来源；用户提供的估计周期只是参考，不把估计永久固化。记录本期任务，用户确认后销账，下期另建实例。

@@ -208,6 +208,7 @@ nav b { margin-left:auto; background:var(--accent); color:#fff; font-size:10px; 
 .field { display:grid; gap:7px; font-size:13px; }
 .field>span { font-weight:550; }
 .field-pair { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.inline-offset input { width:9rem; }
 .input-action { display:flex; gap:10px; }
 .input-action>button { white-space:nowrap; flex-shrink:0; }
 .form-actions { display:flex; justify-content:flex-end; gap:10px; }
